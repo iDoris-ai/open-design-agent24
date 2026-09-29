@@ -16396,6 +16396,42 @@ export async function startServer({
           }
         }
       }
+      if (
+        status === 'succeeded' &&
+        def.persistVisibleTextArtifacts === true &&
+        run.projectId
+      ) {
+        const textArtifacts = extractPlainStreamArtifacts(memoryReplyText);
+        if (textArtifacts.length > 0) {
+          try {
+            const project = getProject(db, run.projectId);
+            const persistedTextArtifacts = await persistPlainStreamArtifactList({
+              projectsRoot: PROJECTS_DIR,
+              projectId: run.projectId,
+              artifacts: textArtifacts,
+              metadata: project?.metadata,
+              writeProjectFile,
+            });
+            for (const artifact of persistedTextArtifacts) {
+              send('agent', {
+                type: 'artifact',
+                source: 'visible-text',
+                name: artifact.name,
+                path: artifact.name,
+                identifier: artifact.identifier,
+                artifactType: artifact.artifactType,
+              });
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            send('error', createSseErrorPayload(
+              'AGENT_EXECUTION_FAILED',
+              `Failed to persist visible-text artifact(s): ${message}`,
+            ));
+            return finishWithRetryDecision('failed', 1, null);
+          }
+        }
+      }
       // Capture the pi session file path for conversational continuity.
       // The session path is discovered by attachPiRpcSession when it
       // processes agent_end; persist it under (conversationId, agentId) so
