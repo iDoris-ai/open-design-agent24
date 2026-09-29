@@ -17130,6 +17130,7 @@ export async function startServer({
               artifacts: textArtifacts,
               metadata: project?.metadata,
               writeProjectFile,
+              overwriteMatchingIdentifier: true,
             });
             for (const artifact of persistedTextArtifacts) {
               send('agent', {

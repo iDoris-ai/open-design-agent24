@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import {
   extractPlainStreamArtifacts,
+  persistPlainStreamArtifactList,
   persistPlainStreamArtifacts,
   plainStdoutFromRunEvents,
 } from '../../src/runtimes/plain-stream.js';
@@ -102,6 +103,37 @@ describe('plain stream artifact extraction', () => {
         .resolves.toBe('existing');
       await expect(readFile(path.join(projectsRoot, 'project-1', 'landing-2.html'), 'utf8'))
         .resolves.toContain('<body>New</body>');
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('can opt in to updating an existing artifact with the same identifier', async () => {
+    const projectsRoot = await mkdtemp(path.join(tmpdir(), 'od-visible-text-artifact-'));
+    try {
+      await persistPlainStreamArtifacts({
+        projectsRoot,
+        projectId: 'project-1',
+        stdout: '<artifact identifier="same" type="text/html"><!doctype html><html><body>v1</body></html></artifact>',
+        writeProjectFile: writeProjectFile as any,
+      });
+      const artifacts = extractPlainStreamArtifacts(
+        '<artifact identifier="same" type="text/html"><!doctype html><html><body>v2</body></html></artifact>',
+      );
+      const written = await persistPlainStreamArtifactList({
+        projectsRoot,
+        projectId: 'project-1',
+        artifacts,
+        writeProjectFile: writeProjectFile as any,
+        overwriteMatchingIdentifier: true,
+      });
+
+      expect(written).toHaveLength(1);
+      expect(written[0]?.name).toBe('same.html');
+      await expect(readFile(path.join(projectsRoot, 'project-1', 'same.html'), 'utf8'))
+        .resolves.toContain('<body>v2</body>');
+      expect((await listFiles(projectsRoot, 'project-1')).filter((file) => file.name.endsWith('.html')))
+        .toHaveLength(1);
     } finally {
       await rm(projectsRoot, { recursive: true, force: true });
     }
