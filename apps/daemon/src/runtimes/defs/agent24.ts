@@ -10,4 +10,5 @@ export const agent24AgentDef = {
   fallbackModels: [DEFAULT_MODEL_OPTION],
   buildArgs: () => ['acp'],
   streamFormat: 'acp-json-rpc',
+  persistVisibleTextArtifacts: true,
 } satisfies RuntimeAgentDef;

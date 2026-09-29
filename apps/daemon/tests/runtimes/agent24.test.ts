@@ -10,6 +10,7 @@ describe('Agent24 runtime adapter', () => {
     expect(agent24AgentDef.versionArgs).toEqual(['--version']);
     expect(agent24AgentDef.buildArgs()).toEqual(['acp']);
     expect(agent24AgentDef.streamFormat).toBe('acp-json-rpc');
+    expect(agent24AgentDef.persistVisibleTextArtifacts).toBe(true);
     expect(agent24AgentDef.fallbackModels).toEqual([
       expect.objectContaining({ id: 'default' }),
     ]);
