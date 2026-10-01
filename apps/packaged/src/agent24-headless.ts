@@ -118,11 +118,12 @@ export function resolveAgent24HeadlessEntries(config: Agent24HeadlessConfig): {
   webSidecarEntry: string;
   webStandaloneRoot: string;
 } {
+  const resourcesRoot = dirname(config.resourceRoot);
   return {
-    daemonCliEntry: join(config.resourceRoot, "app", "prebundled", "daemon", "daemon-cli.mjs"),
-    daemonSidecarEntry: join(config.resourceRoot, "app", "prebundled", "daemon", "daemon-sidecar.mjs"),
-    webSidecarEntry: join(config.resourceRoot, "app", "prebundled", "web-sidecar.mjs"),
-    webStandaloneRoot: join(dirname(config.resourceRoot), "open-design-web-standalone"),
+    daemonCliEntry: join(resourcesRoot, "app", "prebundled", "daemon", "daemon-cli.mjs"),
+    daemonSidecarEntry: join(resourcesRoot, "app", "prebundled", "daemon", "daemon-sidecar.mjs"),
+    webSidecarEntry: join(resourcesRoot, "app", "prebundled", "web-sidecar.mjs"),
+    webStandaloneRoot: join(resourcesRoot, "open-design-web-standalone"),
   };
 }
 

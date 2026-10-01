@@ -57,6 +57,27 @@ export const linuxResources = {
   desktopTemplate: join(resourcesRoot, "linux", "open-design.desktop.template"),
 } as const;
 
+export const AGENT24_HEADLESS_LAUNCHER_FILES = [
+  "agent24-headless.mjs",
+  "agent24-headless.cjs",
+] as const;
+
+export async function copyAgent24HeadlessLauncher({
+  workspaceRoot,
+  prebundledRoot,
+}: {
+  workspaceRoot: string;
+  prebundledRoot: string;
+}): Promise<void> {
+  await mkdir(prebundledRoot, { recursive: true });
+  for (const file of AGENT24_HEADLESS_LAUNCHER_FILES) {
+    await cp(
+      join(workspaceRoot, "apps", "packaged", "dist", file),
+      join(prebundledRoot, file),
+    );
+  }
+}
+
 const BUNDLED_RESOURCE_TREES = [
   { from: "skills", to: "skills" },
   // After the skills/design-templates split (specs/current/skills-and-design-templates.md)

@@ -25,16 +25,16 @@ describe("agent24-headless", () => {
 
   it("derives daemon and web entries from the pinned resource root", () => {
     expect(resolveAgent24HeadlessEntries(config)).toEqual({
-      daemonCliEntry: "/bundle/open-design/app/prebundled/daemon/daemon-cli.mjs",
-      daemonSidecarEntry: "/bundle/open-design/app/prebundled/daemon/daemon-sidecar.mjs",
-      webSidecarEntry: "/bundle/open-design/app/prebundled/web-sidecar.mjs",
+      daemonCliEntry: "/bundle/app/prebundled/daemon/daemon-cli.mjs",
+      daemonSidecarEntry: "/bundle/app/prebundled/daemon/daemon-sidecar.mjs",
+      webSidecarEntry: "/bundle/app/prebundled/web-sidecar.mjs",
       webStandaloneRoot: "/bundle/open-design-web-standalone",
     });
   });
 
   it("starts the existing packaged sidecars and emits a minimal ready contract", async () => {
     const close = vi.fn(async () => undefined);
-    const startSidecars = vi.fn(async () => ({
+    const startSidecars = vi.fn(async (..._args: unknown[]) => ({
       close,
       currentWebUrl: () => "http://127.0.0.1:7456",
       daemon: { state: "running" as const, url: "http://127.0.0.1:7457" },
