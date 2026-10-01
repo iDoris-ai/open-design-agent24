@@ -13,7 +13,10 @@ import {
   validateNodePtyRuntime,
 } from "../node-pty-runtime.js";
 import { hashPackageSourcePath } from "../package-source-hash.js";
-import { copyAgent24HeadlessLauncher } from "../resources/index.js";
+import {
+  AGENT24_HEADLESS_LAUNCHER_FILES,
+  copyAgent24HeadlessLauncher,
+} from "../resources/index.js";
 import { electronBuilderVersionForAppVersion } from "../versioning/index.js";
 import {
   WIN_DAEMON_PREBUNDLE_ESM_REQUIRE_BANNER,
@@ -117,9 +120,23 @@ async function validateNativeRebuildOutput(appRoot: string): Promise<string | nu
   }
 }
 
-async function validateWinPackagedAppRuntime(appRoot: string): Promise<string | null> {
+async function validateWinPackagedAppRuntime(
+  appRoot: string,
+  requireAgent24HeadlessLauncher: boolean,
+): Promise<string | null> {
   const nativeValidationError = await validateNativeRebuildOutput(appRoot);
   if (nativeValidationError != null) return nativeValidationError;
+  if (requireAgent24HeadlessLauncher) {
+    for (const file of AGENT24_HEADLESS_LAUNCHER_FILES) {
+      const launcherPath = join(appRoot, WIN_PREBUNDLED_APP_DIR_NAME, file);
+      try {
+        const metadata = await stat(launcherPath);
+        if (!metadata.isFile() || metadata.size === 0) return `Agent24 headless launcher is invalid: ${launcherPath}`;
+      } catch {
+        return `Agent24 headless launcher is missing: ${launcherPath}`;
+      }
+    }
+  }
   return validateNodePtyRuntime({
     appRoot,
     arch: "x64",
@@ -402,7 +419,7 @@ export async function createWinPackagedAppCacheKey(
     platform: "win32",
     prebundle: shouldUseWinStandalonePrebundle(config.webOutputMode),
     runtimeDependencies: shouldUseWinStandalonePrebundle(config.webOutputMode) ? runtimeDependencies : null,
-    schemaVersion: 6,
+    schemaVersion: 7,
     tarballsKey,
     webOutputMode: config.webOutputMode,
   });
@@ -424,7 +441,7 @@ export async function prepareWinPackagedApp(
     key,
     outputs: ["app"],
     invalidate: async ({ entryRoot }: { entryRoot: string }) => {
-      const nativeValidationError = await validateWinPackagedAppRuntime(join(entryRoot, "app"));
+      const nativeValidationError = await validateWinPackagedAppRuntime(join(entryRoot, "app"), usePrebundle);
       return nativeValidationError == null ? null : { reason: nativeValidationError };
     },
     build: async ({ entryRoot }: { entryRoot: string }): Promise<PackagedAppCacheMetadata> => {
@@ -447,7 +464,7 @@ export async function prepareWinPackagedApp(
         platform: "win32",
       });
       await runElectronRebuild(config, appRoot);
-      const nativeValidationError = await validateWinPackagedAppRuntime(appRoot);
+      const nativeValidationError = await validateWinPackagedAppRuntime(appRoot, usePrebundle);
       if (nativeValidationError != null) throw new Error(nativeValidationError);
       return { packagedVersion };
     },
