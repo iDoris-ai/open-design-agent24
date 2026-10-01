@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { writeFile } from "node:fs/promises";
 
 const sharedOptions = {
   bundle: true,
@@ -19,3 +20,15 @@ await build({
   entryPoints: ["./src/headless.ts"],
   outfile: "./dist/headless.mjs",
 });
+
+await build({
+  ...sharedOptions,
+  entryPoints: ["./src/agent24-headless.ts"],
+  outfile: "./dist/agent24-headless.mjs",
+});
+
+await writeFile(
+  "./dist/agent24-headless.cjs",
+  `'use strict';\nvoid import('./agent24-headless.mjs')\n  .then((module) => module.runAgent24HeadlessCli())\n  .catch((error) => {\n    process.stderr.write(\`agent24-headless failed: \${error instanceof Error ? error.message : String(error)}\\n\`);\n    process.exitCode = 1;\n  });\n`,
+  "utf8",
+);
