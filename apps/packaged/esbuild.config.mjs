@@ -21,11 +21,24 @@ await build({
   outfile: "./dist/headless.mjs",
 });
 
-await build({
-  ...sharedOptions,
+const agent24HeadlessBuild = await build({
+  bundle: true,
   entryPoints: ["./src/agent24-headless.ts"],
+  external: ["@open-design/sidecar"],
+  format: "esm",
+  metafile: true,
   outfile: "./dist/agent24-headless.mjs",
+  platform: "node",
+  target: "node24",
 });
+
+const agent24WorkspaceExternals = Object.values(agent24HeadlessBuild.metafile.outputs)
+  .flatMap((output) => output.imports)
+  .filter((entry) => entry.external && entry.path.startsWith("@open-design/"))
+  .map((entry) => entry.path);
+if (agent24WorkspaceExternals.length !== 1 || agent24WorkspaceExternals[0] !== "@open-design/sidecar") {
+  throw new Error(`agent24-headless has unexpected workspace externals: ${agent24WorkspaceExternals.join(", ")}`);
+}
 
 await writeFile(
   "./dist/agent24-headless.cjs",
