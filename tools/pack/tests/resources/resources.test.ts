@@ -15,8 +15,34 @@ import { dirname, join } from "node:path";
 import process from "node:process";
 
 import { domToPptxBundleResource } from "@/dom-to-pptx-resource.js";
-import { copyBundledResourceTrees } from "@/resources/index.js";
+import {
+  copyAgent24HeadlessLauncher,
+  copyBundledResourceTrees,
+} from "@/resources/index.js";
 import { copyOptionalVelaCliBinary, resolveOptionalVelaCliBinary } from "@/vela-cli.js";
+
+describe("copyAgent24HeadlessLauncher", () => {
+  it("materializes both launcher files into the stable prebundled root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "od-agent24-headless-"));
+    try {
+      const workspaceRoot = join(root, "workspace");
+      const dist = join(workspaceRoot, "apps", "packaged", "dist");
+      const prebundledRoot = join(root, "resources", "app", "prebundled");
+      await mkdir(dist, { recursive: true });
+      await writeFile(join(dist, "agent24-headless.mjs"), "export const marker = 1;\n", "utf8");
+      await writeFile(join(dist, "agent24-headless.cjs"), "require('./agent24-headless.mjs');\n", "utf8");
+
+      await copyAgent24HeadlessLauncher({ workspaceRoot, prebundledRoot });
+
+      await expect(readFile(join(prebundledRoot, "agent24-headless.mjs"), "utf8"))
+        .resolves.toContain("marker = 1");
+      await expect(readFile(join(prebundledRoot, "agent24-headless.cjs"), "utf8"))
+        .resolves.toContain("agent24-headless.mjs");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+});
 
 async function writeFakeOpenCodeCompanion(
   source: string,

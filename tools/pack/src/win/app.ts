@@ -13,6 +13,7 @@ import {
   validateNodePtyRuntime,
 } from "../node-pty-runtime.js";
 import { hashPackageSourcePath } from "../package-source-hash.js";
+import { copyAgent24HeadlessLauncher } from "../resources/index.js";
 import { electronBuilderVersionForAppVersion } from "../versioning/index.js";
 import {
   WIN_DAEMON_PREBUNDLE_ESM_REQUIRE_BANNER,
@@ -297,6 +298,10 @@ async function buildPrebundledStandaloneRuntime(
   paths: WinPaths,
 ): Promise<void> {
   await mkdir(paths.assembledPrebundledRoot, { recursive: true });
+  await copyAgent24HeadlessLauncher({
+    workspaceRoot: config.workspaceRoot,
+    prebundledRoot: paths.assembledPrebundledRoot,
+  });
   await mkdir(dirname(paths.packagedMainPrebundleMetaPath), { recursive: true });
   await runEsbuild(config, [
     join(config.workspaceRoot, "apps", "packaged", "dist", "index.mjs"),
