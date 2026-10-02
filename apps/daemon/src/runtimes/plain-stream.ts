@@ -1,4 +1,5 @@
 import type { ProjectFile } from '@open-design/contracts';
+import { Buffer } from 'node:buffer';
 import { createProjectArtifactFile } from '../artifacts/create.js';
 import {
   listFiles as defaultListFiles,
@@ -31,7 +32,14 @@ interface RunEventLike {
 
 type SupportedArtifactExtension = '.html' | '.css' | '.svg' | '.md';
 
-type WriteProjectFile = Parameters<typeof createProjectArtifactFile>[0]['writeProjectFile'];
+type WriteProjectFile = (
+  projectsRoot: string,
+  projectId: string,
+  name: string,
+  body: Buffer,
+  options?: { overwrite?: boolean; artifactManifest?: unknown },
+  metadata?: unknown,
+) => Promise<unknown>;
 
 type ListFiles = (
   projectsRoot: string,
@@ -149,6 +157,13 @@ export async function persistPlainStreamArtifactList(options: {
   metadata?: unknown;
   writeProjectFile?: WriteProjectFile;
   listFiles?: ListFiles;
+  /**
+   * Structured-runtime compatibility mode: an artifact that repeats the exact
+   * same non-empty identifier updates that artifact's existing project file
+   * instead of allocating a `-2` sibling. Plain-stream callers keep the
+   * historical create-only behavior unless they explicitly opt in.
+   */
+  overwriteMatchingIdentifier?: boolean;
 }): Promise<PersistedPlainStreamArtifact[]> {
   const artifacts = options.artifacts;
   if (artifacts.length === 0) return [];
@@ -162,19 +177,36 @@ export async function persistPlainStreamArtifactList(options: {
   const persisted: PersistedPlainStreamArtifact[] = [];
 
   for (const artifact of artifacts) {
-    const name = reserveUniqueArtifactFileName(artifact.fileName, reservedNames);
+    const matching = options.overwriteMatchingIdentifier && artifact.identifier
+      ? existingFiles.find((file) => {
+          const metadata = file.artifactManifest?.metadata;
+          return metadata
+            && typeof metadata.identifier === 'string'
+            && metadata.identifier === artifact.identifier;
+        })
+      : undefined;
+    const name = matching?.name ?? reserveUniqueArtifactFileName(artifact.fileName, reservedNames);
     const manifest = artifactManifestFor(artifact, name);
-    const file = await createProjectArtifactFile({
-      projectsRoot: options.projectsRoot,
-      projectId: options.projectId,
-      input: {
-        name,
-        content: artifact.content,
-        artifactManifest: manifest,
-      },
-      metadata: options.metadata,
-      writeProjectFile,
-    });
+    const file = matching
+      ? await writeProjectFile(
+          options.projectsRoot,
+          options.projectId,
+          name,
+          Buffer.from(artifact.content, 'utf8'),
+          { overwrite: true, artifactManifest: manifest },
+          options.metadata,
+        )
+      : await createProjectArtifactFile({
+          projectsRoot: options.projectsRoot,
+          projectId: options.projectId,
+          input: {
+            name,
+            content: artifact.content,
+            artifactManifest: manifest,
+          },
+          metadata: options.metadata,
+          writeProjectFile,
+        });
     persisted.push({
       identifier: artifact.identifier,
       artifactType: artifact.artifactType,
