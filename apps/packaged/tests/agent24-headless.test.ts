@@ -4,6 +4,7 @@ import {
   AGENT24_HEADLESS_PROTOCOL,
   parseAgent24HeadlessConfig,
   resolveAgent24HeadlessEntries,
+  resolveAgent24HeadlessPaths,
   startAgent24Headless,
 } from "../src/agent24-headless.js";
 
@@ -30,6 +31,12 @@ describe("agent24-headless", () => {
       webSidecarEntry: "/bundle/app/prebundled/web-sidecar.mjs",
       webStandaloneRoot: "/bundle/open-design-web-standalone",
     });
+  });
+
+  it("pins installation authority to the host-managed resource parent, not writable data", () => {
+    const paths = resolveAgent24HeadlessPaths(config);
+    expect(paths.installationRoot).toBe("/bundle");
+    expect(paths.dataRoot).toBe("/state/open-design/data");
   });
 
   it("starts the existing packaged sidecars and emits a minimal ready contract", async () => {
