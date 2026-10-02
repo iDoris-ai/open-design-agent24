@@ -567,10 +567,13 @@ describe('buildPackagedDaemonSpawnEnv', () => {
       daemonCliEntry: null,
       legacyDataDir: null,
       requireDesktopAuth: true,
+      resourceSafeBase: '/Applications/Agent24.app/Contents/Resources',
     });
     expect(env.OD_REQUIRE_DESKTOP_AUTH).toBe('1');
     expect(env.OD_DATA_DIR).toBe('/tmp/od-pkg/data');
     expect(env.OD_RESOURCE_ROOT).toBe('/tmp/od-pkg/resources');
+    expect(env.OD_INSTALLATION_DIR).toBe('/tmp/od-pkg/..');
+    expect(env.OD_PACKAGED_RESOURCE_SAFE_BASE).toBe('/Applications/Agent24.app/Contents/Resources');
     expect(env.OD_APP_VERSION).toBe('1.2.3');
     expect(env.OD_LEGACY_DATA_DIR).toBeUndefined();
   });
