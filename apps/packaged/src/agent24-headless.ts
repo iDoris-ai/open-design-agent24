@@ -102,7 +102,7 @@ export function resolveAgent24HeadlessPaths(config: Agent24HeadlessConfig): Pack
     desktopLogsRoot: join(logsRoot, APP_KEYS.DESKTOP),
     electronSessionDataRoot: join(namespaceRoot, "user-data", "session"),
     electronUserDataRoot: join(namespaceRoot, "user-data"),
-    installationRoot: dirname(config.dataRoot),
+    installationRoot: dirname(config.resourceRoot),
     installerObservationRoot: join(config.dataRoot, "observations", "installer"),
     logsRoot,
     namespaceRoot,
