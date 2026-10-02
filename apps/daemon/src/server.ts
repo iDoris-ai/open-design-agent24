@@ -1222,12 +1222,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = resolveProjectRoot(__dirname);
 const RESOURCE_ROOT_ENV = 'OD_RESOURCE_ROOT';
+const PACKAGED_RESOURCE_SAFE_BASE_ENV = 'OD_PACKAGED_RESOURCE_SAFE_BASE';
+const packagedResourceSafeBase = process.env[PACKAGED_RESOURCE_SAFE_BASE_ENV]?.trim();
 
 const DAEMON_RESOURCE_ROOT = resolveDaemonResourceRoot({
   safeBases: [
     PROJECT_ROOT,
     resolveProcessResourcesPath(),
-    process.env.OD_INSTALLATION_DIR,
+    // Agent24 headless supplies a resource-only packaged base because its
+    // installation root is writable state used for installation.json.
+    // Preserve the historical installation-root fallback for existing Open
+    // Design launcher payloads, but never grant it resource authority when
+    // the host supplies the narrower packaged base.
+    packagedResourceSafeBase || process.env.OD_INSTALLATION_DIR,
   ],
 });
 // Built web app lives in `out/` — that's where Next.js writes the static

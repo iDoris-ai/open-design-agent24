@@ -4,13 +4,14 @@ import {
   AGENT24_HEADLESS_PROTOCOL,
   parseAgent24HeadlessConfig,
   resolveAgent24HeadlessEntries,
+  resolveAgent24HeadlessPaths,
   startAgent24Headless,
 } from "../src/agent24-headless.js";
 
 const config = parseAgent24HeadlessConfig({
   protocol: AGENT24_HEADLESS_PROTOCOL,
   pinVersion: "0.22.2",
-  resourceRoot: "/bundle/open-design",
+  resourceRoot: "/bundle/resources/open-design",
   dataRoot: "/state/open-design/data",
   runtimeRoot: "/state/open-design/runtime",
   runtimeExecutable: "/bundle/Agent24",
@@ -25,11 +26,18 @@ describe("agent24-headless", () => {
 
   it("derives daemon and web entries from the pinned resource root", () => {
     expect(resolveAgent24HeadlessEntries(config)).toEqual({
-      daemonCliEntry: "/bundle/app/prebundled/daemon/daemon-cli.mjs",
-      daemonSidecarEntry: "/bundle/app/prebundled/daemon/daemon-sidecar.mjs",
-      webSidecarEntry: "/bundle/app/prebundled/web-sidecar.mjs",
-      webStandaloneRoot: "/bundle/open-design-web-standalone",
+      daemonCliEntry: "/bundle/resources/app/prebundled/daemon/daemon-cli.mjs",
+      daemonSidecarEntry: "/bundle/resources/app/prebundled/daemon/daemon-sidecar.mjs",
+      webSidecarEntry: "/bundle/resources/app/prebundled/web-sidecar.mjs",
+      webStandaloneRoot: "/bundle/resources/open-design-web-standalone",
     });
+  });
+
+  it("keeps installation identity in writable state while resources stay packaged", () => {
+    const paths = resolveAgent24HeadlessPaths(config);
+    expect(paths.installationRoot).toBe("/state/open-design");
+    expect(paths.dataRoot).toBe("/state/open-design/data");
+    expect(paths.resourceRoot).toBe("/bundle/resources/open-design");
   });
 
   it("starts the existing packaged sidecars and emits a minimal ready contract", async () => {
@@ -59,6 +67,7 @@ describe("agent24-headless", () => {
       electronNodeCommand: "/bundle/Agent24",
       nodeCommand: null,
       requireDesktopAuth: false,
+      resourceSafeBase: "/bundle/resources",
       webOutputMode: "standalone",
     });
     expect(runtime.ready).toEqual({
@@ -72,6 +81,45 @@ describe("agent24-headless", () => {
     });
     await runtime.close();
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a resource root outside the packaged runtime resources directory", async () => {
+    const startSidecars = vi.fn();
+    await expect(startAgent24Headless({
+      ...config,
+      resourceRoot: "/state/open-design/resources",
+    }, {
+      access: vi.fn(async () => undefined),
+      randomUUID: () => "instance-1",
+      startSidecars: startSidecars as never,
+    })).rejects.toThrow(/packaged resources directory/);
+    expect(startSidecars).not.toHaveBeenCalled();
+  });
+
+  it("derives the macOS resource safe base from Contents/MacOS", async () => {
+    const macConfig = {
+      ...config,
+      resourceRoot: "/Applications/Agent24.app/Contents/Resources/open-design",
+      runtimeExecutable: "/Applications/Agent24.app/Contents/MacOS/Agent24",
+    };
+    const close = vi.fn(async () => undefined);
+    const startSidecars = vi.fn(async (..._args: unknown[]) => ({
+      close,
+      currentWebUrl: () => "http://127.0.0.1:7456",
+      daemon: { state: "running" as const, url: "http://127.0.0.1:7457" },
+      web: { state: "running" as const, url: "http://127.0.0.1:7456" },
+    }));
+
+    const runtime = await startAgent24Headless(macConfig, {
+      access: vi.fn(async () => undefined),
+      randomUUID: () => "instance-mac",
+      startSidecars: startSidecars as never,
+    });
+
+    expect(startSidecars.mock.calls[0]?.[2]).toMatchObject({
+      resourceSafeBase: "/Applications/Agent24.app/Contents/Resources",
+    });
+    await runtime.close();
   });
 
   it("fails closed on a non-loopback ready endpoint and closes its sidecars", async () => {
