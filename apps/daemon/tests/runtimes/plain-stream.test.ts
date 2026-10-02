@@ -139,6 +139,32 @@ describe('plain stream artifact extraction', () => {
     }
   });
 
+  it('persists a complete artifact whose close tag lands beyond the memory reply cap', async () => {
+    const projectsRoot = await mkdtemp(path.join(tmpdir(), 'od-visible-text-artifact-long-'));
+    try {
+      const stdout = [
+        'x'.repeat((32 * 1024) + 512),
+        '<artifact identifier="long-reply" type="text/html">',
+        '<!doctype html><html><body>Past the memory cap</body></html>',
+        '</artifact>',
+      ].join('');
+
+      const written = await persistPlainStreamArtifacts({
+        projectsRoot,
+        projectId: 'project-1',
+        stdout,
+        writeProjectFile: writeProjectFile as any,
+      });
+
+      expect(written).toHaveLength(1);
+      expect(written[0]?.name).toBe('long-reply.html');
+      await expect(readFile(path.join(projectsRoot, 'project-1', 'long-reply.html'), 'utf8'))
+        .resolves.toContain('Past the memory cap');
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true });
+    }
+  });
+
   it('ignores bare artifact tags to match the web artifact parser', () => {
     const artifacts = extractPlainStreamArtifacts([
       '<artifact><!doctype html><html><body>Bare</body></html></artifact>',
