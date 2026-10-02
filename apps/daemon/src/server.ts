@@ -16401,7 +16401,7 @@ export async function startServer({
         def.persistVisibleTextArtifacts === true &&
         run.projectId
       ) {
-        const textArtifacts = extractPlainStreamArtifacts(memoryReplyText);
+        const textArtifacts = extractPlainStreamArtifacts(visibleAssistantText);
         if (textArtifacts.length > 0) {
           try {
             const project = getProject(db, run.projectId);
