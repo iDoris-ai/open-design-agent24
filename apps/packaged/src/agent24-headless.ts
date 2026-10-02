@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
-import { isAbsolute, dirname, join } from "node:path";
+import { basename, isAbsolute, dirname, join, relative } from "node:path";
 
 import {
   APP_KEYS,
@@ -112,6 +112,21 @@ export function resolveAgent24HeadlessPaths(config: Agent24HeadlessConfig): Pack
   };
 }
 
+function resolveAgent24ResourceSafeBase(runtimeExecutable: string): string {
+  const runtimeDir = dirname(runtimeExecutable);
+  const parentDir = dirname(runtimeDir);
+  return basename(runtimeDir) === "MacOS" && basename(parentDir) === "Contents"
+    ? join(parentDir, "Resources")
+    : join(runtimeDir, "resources");
+}
+
+function assertAgent24ResourceRoot(config: Agent24HeadlessConfig): string {
+  const safeBase = resolveAgent24ResourceSafeBase(config.runtimeExecutable);
+  const rel = relative(safeBase, config.resourceRoot);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return safeBase;
+  throw new Error("agent24-headless config resourceRoot must be under the packaged resources directory");
+}
+
 export function resolveAgent24HeadlessEntries(config: Agent24HeadlessConfig): {
   daemonCliEntry: string;
   daemonSidecarEntry: string;
@@ -155,6 +170,7 @@ export async function startAgent24Headless(
   config: Agent24HeadlessConfig,
   dependencies: Agent24HeadlessDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<{ close(): Promise<void>; ready: Agent24HeadlessReady }> {
+  const resourceSafeBase = assertAgent24ResourceRoot(config);
   const paths = resolveAgent24HeadlessPaths(config);
   const entries = resolveAgent24HeadlessEntries(config);
   await Promise.all([
@@ -186,6 +202,7 @@ export async function startAgent24Headless(
       telemetryRelayUrl: null,
       posthogKey: null,
       posthogHost: null,
+      resourceSafeBase,
       velaWebUrl: null,
       velaWebUrls: {},
       requireDesktopAuth: false,
