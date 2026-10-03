@@ -45,7 +45,8 @@ describe('Home logo assets', () => {
     // a plain <img>; the logotype now ships as the pixel-scan engine's sample
     // source (logo-scan.svg) rather than an inline `src="/logo-03.svg"`.
     expect(heroPixelScanSvg).toContain('<svg');
-    expect(homeHeroSource).toContain('<PixelScanLogo');
+    // Agent24 fork: the hero mounts the iDoris Design mascot logo instead.
+    expect(homeHeroSource).toContain('<IDorisDesignLogo');
     expect(homeHeroSource).not.toContain('src="/logo-03.svg"');
     expect(homeHeroSource).not.toContain('src="/app-icon.svg"');
 

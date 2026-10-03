@@ -53,7 +53,7 @@ import {
   type HomeHeroChip,
 } from './home-hero/chips';
 import { homeHeroChipLabel } from './home-hero/chip-labels';
-import { PixelScanLogo } from './home-hero/PixelScanLogo';
+import { IDorisDesignLogo } from './home-hero/IDorisDesignLogo';
 import { ScenarioArt } from './home-hero/ScenarioArt';
 import { useEdgeAutoScroll, EdgeScrollZones } from './home-hero/EdgeAutoScroll';
 import {
@@ -1294,8 +1294,10 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
           static wordmark is now a WebGL pixel-scan effect (round 7) — the
           title heading below it is dropped too, since the animated wordmark
           alone carries the brand moment. */}
+      {/* Agent24 fork: iDoris Design mascot + wordmark replaces the upstream
+          PixelScanLogo (kept in home-hero/ to minimise the upstream diff). */}
       <span className="home-hero__logo-wrap">
-        <PixelScanLogo className="home-hero__logo home-hero__logo--tiles" />
+        <IDorisDesignLogo className="home-hero__logo" />
       </span>
 
       {/* Capsule type row: the 10 top-level create-scenario types as pill chips above
