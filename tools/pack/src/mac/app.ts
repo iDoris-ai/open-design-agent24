@@ -23,7 +23,11 @@ import {
   prepareNodePtyRuntime,
   resolveNodePtyRuntimeArch,
 } from "../node-pty-runtime.js";
-import { copyBundledResourceTrees, packBundledDshRuntime } from "../resources/index.js";
+import {
+  copyAgent24HeadlessLauncher,
+  copyBundledResourceTrees,
+  packBundledDshRuntime,
+} from "../resources/index.js";
 import { copyOptionalVelaCliBinary } from "../vela-cli.js";
 import { electronBuilderVersionForAppVersion } from "../versioning/index.js";
 import { runEsbuild, runNpmInstall, runPnpm } from "./commands.js";
@@ -55,6 +59,10 @@ async function buildPrebundledStandaloneRuntime(
   paths: MacPaths,
 ): Promise<void> {
   await mkdir(paths.assembledPrebundledRoot, { recursive: true });
+  await copyAgent24HeadlessLauncher({
+    workspaceRoot: config.workspaceRoot,
+    prebundledRoot: paths.assembledPrebundledRoot,
+  });
   await mkdir(dirname(paths.packagedMainPrebundleMetaPath), { recursive: true });
   await runEsbuild(config, [
     join(config.workspaceRoot, "apps", "packaged", "dist", "index.mjs"),
