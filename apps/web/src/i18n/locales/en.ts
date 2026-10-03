@@ -320,7 +320,7 @@ export const en: Dict = {
   'plugins.actions.openSource': 'Open source',
   'plugins.actions.openHomepage': 'Open homepage',
   'plugins.actions.openMarketplace': 'Open in marketplace',
-  'app.brand': 'OpenDesign',
+  'app.brand': 'iDoris Design',
   'app.brandPill': 'Research Preview',
   'app.brandSubtitle': 'by Nexu Labs',
   'app.welcomeLoading': 'Loading workspace…',
