@@ -1,4 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { access as realAccess } from "node:fs/promises";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AGENT24_HEADLESS_PROTOCOL,
@@ -122,6 +127,34 @@ describe("agent24-headless", () => {
     await runtime.close();
   });
 
+  // M5 (Opus re-review, 2026-10-06): proves the v1 fallback (resourceSafeBase
+  // omitted) is untouched by H1's stricter v2 check — resourceRoot equal to
+  // the DERIVED safe base is still accepted here, exactly as it always was.
+  // H1 only tightens the branch where a host explicitly SETS
+  // resourceSafeBase (see the "v2 explicit resourceSafeBase" describe
+  // block below).
+  it("v2 config without resourceSafeBase keeps the old, lenient v1 derivation (resourceRoot === derived base is still accepted)", async () => {
+    const close = vi.fn(async () => undefined);
+    const startSidecars = vi.fn(async (..._args: unknown[]) => ({
+      close,
+      currentWebUrl: () => "http://127.0.0.1:7456",
+      daemon: { state: "running" as const, url: "http://127.0.0.1:7457" },
+      web: { state: "running" as const, url: "http://127.0.0.1:7456" },
+    }));
+    const cfg = parseAgent24HeadlessConfig({
+      ...config,
+      resourceRoot: "/bundle/resources", // equals resolveAgent24ResourceSafeBase("/bundle/Agent24") exactly
+      runtimeExecutable: "/bundle/Agent24",
+    });
+    const runtime = await startAgent24Headless(cfg, {
+      access: vi.fn(async () => undefined),
+      randomUUID: () => "instance-v1-equal",
+      startSidecars: startSidecars as never,
+    });
+    expect(startSidecars.mock.calls[0]?.[2]).toMatchObject({ resourceSafeBase: "/bundle/resources" });
+    await runtime.close();
+  });
+
   it("fails closed on a non-loopback ready endpoint and closes its sidecars", async () => {
     const close = vi.fn(async () => undefined);
     await expect(startAgent24Headless(config, {
@@ -137,7 +170,7 @@ describe("agent24-headless", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  describe("v2 explicit resourceSafeBase (on-demand / externally-installed resources)", () => {
+  describe("v2 explicit resourceSafeBase (on-demand / externally-installed resources) — mocked fs", () => {
     // The externally-installed resourceRoot no longer lives anywhere near
     // runtimeExecutable (e.g. ~/.agent24/components/open-design/<hash>/ on
     // Agent24) — the old runtimeExecutable-derived safe base can never
@@ -145,11 +178,17 @@ describe("agent24-headless", () => {
     // the only way to accept this layout without lexical tricks (symlinks)
     // that a real filesystem boundary (readonly AppImage mount, /opt
     // permissions, a signed .app bundle) would reject anyway.
+    //
+    // These tests mock realpath/lstat/homedir entirely — fast, deterministic
+    // coverage of the pure decision logic. The "real tmpdir filesystem"
+    // describe block further below additionally proves the REAL,
+    // unmocked fs-backed dependencies wire up the same way.
     const externalConfig = parseAgent24HeadlessConfig({
       ...config,
       resourceRoot: "/home/user/.agent24/components/open-design/abc1234-linux-x64/open-design",
       resourceSafeBase: "/home/user/.agent24/components/open-design/abc1234-linux-x64",
     });
+    const homedir = () => "/home/user";
 
     function startSidecarsStub() {
       const close = vi.fn(async () => undefined);
@@ -171,7 +210,8 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        stat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        homedir,
       });
       expect(startSidecars.mock.calls[0]?.[2]).toMatchObject({
         resourceSafeBase: externalConfig.resourceSafeBase,
@@ -187,12 +227,13 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async () => "/some/other/real/location"),
-        stat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        homedir,
       })).rejects.toThrow(/own realpath/);
       expect(startSidecars).not.toHaveBeenCalled();
     });
 
-    it("rejects a resourceRoot that is not under the explicit resourceSafeBase", async () => {
+    it("rejects a resourceRoot that is not strictly under the explicit resourceSafeBase", async () => {
       const { startSidecars } = startSidecarsStub();
       const escaped = parseAgent24HeadlessConfig({
         ...externalConfig,
@@ -203,8 +244,48 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        stat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700 })),
-      })).rejects.toThrow(/must be under resourceSafeBase/);
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        homedir,
+      })).rejects.toThrow(/strictly under resourceSafeBase/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    // H1
+    it("H1: rejects resourceRoot === resourceSafeBase (every entry point would resolve outside the verified base)", async () => {
+      const { startSidecars } = startSidecarsStub();
+      const equalConfig = parseAgent24HeadlessConfig({
+        ...externalConfig,
+        resourceRoot: externalConfig.resourceSafeBase,
+      });
+      await expect(startAgent24Headless(equalConfig, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        homedir,
+      })).rejects.toThrow(/strictly under resourceSafeBase/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    // "base vs base-evil" prefix collision: path.relative is segment-aware,
+    // not a naive string prefix check — a sibling directory whose name
+    // merely starts with the same characters as safeBase must not be
+    // mistaken for "under" it.
+    it("rejects a resourceRoot that shares a string prefix with resourceSafeBase but is not actually under it (base vs base-evil)", async () => {
+      const { startSidecars } = startSidecarsStub();
+      const collidingConfig = parseAgent24HeadlessConfig({
+        ...externalConfig,
+        resourceRoot: "/home/user/.agent24/components/open-design/abc1234-linux-x64-evil/open-design",
+      });
+      await expect(startAgent24Headless(collidingConfig, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        homedir,
+      })).rejects.toThrow(/strictly under resourceSafeBase/);
       expect(startSidecars).not.toHaveBeenCalled();
     });
 
@@ -216,7 +297,8 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        stat: vi.fn(async () => ({ uid: process.getuid!() + 1, mode: 0o700 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid!() + 1, mode: 0o700, dev: 1, ino: 1 })),
+        homedir,
       })).rejects.toThrow(/owned by the current user/);
       expect(startSidecars).not.toHaveBeenCalled();
     });
@@ -229,8 +311,307 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        stat: vi.fn(async () => ({ uid: process.getuid!() ?? 0, mode: 0o777 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid!() ?? 0, mode: 0o777, dev: 1, ino: 1 })),
+        homedir,
       })).rejects.toThrow(/group- or other-writable/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    // M1, the sticky-bit exception: a world-writable ancestor is fine as
+    // long as the sticky bit is set (e.g. /tmp, mode 1777) — only the
+    // sticky-less case must reject.
+    it("accepts a world-writable resourceSafeBase ONLY when the sticky bit is set", async () => {
+      const { close, startSidecars } = startSidecarsStub();
+      const runtime = await startAgent24Headless(externalConfig, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o1777, dev: 1, ino: 1 })),
+        homedir,
+      });
+      await runtime.close();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    // M2
+    it("M2: rejects resourceSafeBase outright on win32 (no ACL check implemented yet)", async () => {
+      const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+      try {
+        const { startSidecars } = startSidecarsStub();
+        await expect(startAgent24Headless(externalConfig, {
+          access: vi.fn(async () => undefined),
+          randomUUID: () => "instance-external",
+          startSidecars: startSidecars as never,
+        })).rejects.toThrow(/win32/);
+        expect(startSidecars).not.toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    });
+
+    // M3
+    it("M3: rejects a dataRoot that overlaps resourceSafeBase", async () => {
+      const { startSidecars } = startSidecarsStub();
+      const overlapping = parseAgent24HeadlessConfig({
+        ...externalConfig,
+        dataRoot: "/home/user/.agent24/components/open-design/abc1234-linux-x64/data",
+      });
+      await expect(startAgent24Headless(overlapping, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        homedir,
+      })).rejects.toThrow(/dataRoot must not be under resourceSafeBase/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("M3: rejects a runtimeRoot that overlaps resourceSafeBase", async () => {
+      const { startSidecars } = startSidecarsStub();
+      const overlapping = parseAgent24HeadlessConfig({
+        ...externalConfig,
+        runtimeRoot: "/home/user/.agent24/components/open-design/abc1234-linux-x64/runtime",
+      });
+      await expect(startAgent24Headless(overlapping, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        homedir,
+      })).rejects.toThrow(/runtimeRoot must not be under resourceSafeBase/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    // M1 (TOCTOU). A real race can't be reproduced deterministically on a
+    // real filesystem inside a unit test, so this one intentionally stays
+    // mocked: the lstat stub reports a different (dev, ino) once the
+    // access() checks (which happen strictly after the initial
+    // resourceSafeBase verification, strictly before the pre-spawn
+    // re-check) have resolved.
+    it("M1 TOCTOU: rejects when resourceSafeBase's (dev, ino) changed between the initial check and the pre-spawn re-check", async () => {
+      const { startSidecars } = startSidecarsStub();
+      let swapped = false;
+      await expect(startAgent24Headless(externalConfig, {
+        access: vi.fn(async () => { swapped = true; }),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async () => ({
+          uid: process.getuid?.() ?? 0,
+          mode: 0o700,
+          dev: 1,
+          ino: swapped ? 999 : 100,
+        })),
+        homedir,
+      })).rejects.toThrow(/TOCTOU swap/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("v2 explicit resourceSafeBase — real tmpdir filesystem (not mocked)", () => {
+    // These exercise the REAL, unmocked fs-backed dependencies
+    // (DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES) against a real tmpdir —
+    // every test above mocks realpath/lstat/homedir entirely, which never
+    // actually proves the real wiring (node:fs/promises' realpath/lstat,
+    // node:os's homedir) agrees with the mocked behavior.
+    const cleanupDirs: string[] = [];
+    afterEach(() => {
+      for (const dir of cleanupDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    function makeRealFixture(): { home: string; safeBase: string; resourceRoot: string; runtimeExecutable: string } {
+      const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "a24-headless-home-")));
+      cleanupDirs.push(home);
+      fs.chmodSync(home, 0o700);
+      const safeBase = path.join(home, ".agent24", "components", "open-design", "abc1234-linux-x64");
+      fs.mkdirSync(safeBase, { recursive: true, mode: 0o700 });
+      for (const dir of [
+        path.join(home, ".agent24"),
+        path.join(home, ".agent24", "components"),
+        path.join(home, ".agent24", "components", "open-design"),
+        safeBase,
+      ]) fs.chmodSync(dir, 0o700);
+      const resourceRoot = path.join(safeBase, "open-design");
+      fs.mkdirSync(resourceRoot, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(path.join(safeBase, "app", "prebundled", "daemon"), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(path.join(safeBase, "app", "prebundled", "daemon", "daemon-cli.mjs"), "");
+      fs.writeFileSync(path.join(safeBase, "app", "prebundled", "daemon", "daemon-sidecar.mjs"), "");
+      fs.writeFileSync(path.join(safeBase, "app", "prebundled", "web-sidecar.mjs"), "");
+      fs.mkdirSync(path.join(safeBase, "open-design-web-standalone"), { recursive: true, mode: 0o700 });
+      const runtimeExecutable = path.join(home, "Agent24");
+      fs.writeFileSync(runtimeExecutable, "");
+      return { home, safeBase, resourceRoot, runtimeExecutable };
+    }
+
+    async function withRealFixtureHome<T>(fixture: { home: string }, fn: () => Promise<T>): Promise<T> {
+      // os.homedir() reads $HOME on POSIX at call time (no caching) — this
+      // is how the REAL (unmocked) homedir dependency is pointed at our
+      // fixture instead of this machine's actual home directory.
+      const previousHome = process.env.HOME;
+      process.env.HOME = fixture.home;
+      try {
+        return await fn();
+      } finally {
+        process.env.HOME = previousHome;
+      }
+    }
+
+    function realFsDependencies(startSidecars: ReturnType<typeof vi.fn>, instanceId = "instance-real-fs") {
+      // Deliberately no realpath/lstat/homedir overrides: this is what
+      // "not mocked" means here. Only randomUUID/startSidecars are
+      // stubbed, since a unit test should not actually spawn sidecar
+      // processes.
+      return { access: realAccess, randomUUID: () => instanceId, startSidecars: startSidecars as never };
+    }
+
+    it("real wiring: accepts a real tmpdir fixture end-to-end with nothing mocked but randomUUID/startSidecars", async () => {
+      if (typeof process.getuid !== "function") return; // POSIX-only check
+      const fixture = makeRealFixture();
+      const cfg = parseAgent24HeadlessConfig({
+        ...config,
+        resourceRoot: fixture.resourceRoot,
+        resourceSafeBase: fixture.safeBase,
+        runtimeExecutable: fixture.runtimeExecutable,
+      });
+      const close = vi.fn(async () => undefined);
+      const startSidecars = vi.fn(async (..._args: unknown[]) => ({
+        close,
+        currentWebUrl: () => "http://127.0.0.1:7456",
+        daemon: { state: "running" as const, url: "http://127.0.0.1:7457" },
+        web: { state: "running" as const, url: "http://127.0.0.1:7456" },
+      }));
+      await withRealFixtureHome(fixture, async () => {
+        const runtime = await startAgent24Headless(cfg, realFsDependencies(startSidecars));
+        expect(startSidecars.mock.calls[0]?.[2]).toMatchObject({ resourceSafeBase: fixture.safeBase });
+        await runtime.close();
+      });
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a resourceSafeBase that is a real symlink", async () => {
+      if (typeof process.getuid !== "function") return;
+      const fixture = makeRealFixture();
+      const linkedBase = path.join(fixture.home, "linked-base");
+      fs.symlinkSync(fixture.safeBase, linkedBase);
+      const cfg = parseAgent24HeadlessConfig({
+        ...config,
+        resourceRoot: path.join(linkedBase, "open-design"),
+        resourceSafeBase: linkedBase,
+        runtimeExecutable: fixture.runtimeExecutable,
+      });
+      const startSidecars = vi.fn();
+      await withRealFixtureHome(fixture, async () => {
+        await expect(startAgent24Headless(cfg, realFsDependencies(startSidecars))).rejects.toThrow(/own realpath/);
+      });
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("rejects when a launcher entry's directory is a real symlink that escapes resourceSafeBase", async () => {
+      if (typeof process.getuid !== "function") return;
+      const fixture = makeRealFixture();
+      // Replace the safe app/ directory with a symlink pointing OUTSIDE
+      // safeBase — resourceRoot itself still resolves fine, but every
+      // entry point (derived from dirname(resourceRoot) + "app/...") now
+      // resolves through this symlink to somewhere unverified.
+      fs.rmSync(path.join(fixture.safeBase, "app"), { recursive: true, force: true });
+      const evilAppRoot = path.join(fixture.home, "evil-app");
+      fs.mkdirSync(path.join(evilAppRoot, "prebundled", "daemon"), { recursive: true });
+      fs.writeFileSync(path.join(evilAppRoot, "prebundled", "daemon", "daemon-cli.mjs"), "");
+      fs.writeFileSync(path.join(evilAppRoot, "prebundled", "daemon", "daemon-sidecar.mjs"), "");
+      fs.writeFileSync(path.join(evilAppRoot, "prebundled", "web-sidecar.mjs"), "");
+      fs.symlinkSync(evilAppRoot, path.join(fixture.safeBase, "app"));
+
+      const cfg = parseAgent24HeadlessConfig({
+        ...config,
+        resourceRoot: fixture.resourceRoot,
+        resourceSafeBase: fixture.safeBase,
+        runtimeExecutable: fixture.runtimeExecutable,
+      });
+      const startSidecars = vi.fn();
+      await withRealFixtureHome(fixture, async () => {
+        await expect(startAgent24Headless(cfg, realFsDependencies(startSidecars)))
+          .rejects.toThrow(/realpath must be strictly under resourceSafeBase/);
+      });
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it.each([0o770, 0o702, 0o777])("rejects a real resourceSafeBase with unsafe mode 0o%o", async (mode) => {
+      if (typeof process.getuid !== "function") return;
+      const fixture = makeRealFixture();
+      fs.chmodSync(fixture.safeBase, mode);
+      const cfg = parseAgent24HeadlessConfig({
+        ...config,
+        resourceRoot: fixture.resourceRoot,
+        resourceSafeBase: fixture.safeBase,
+        runtimeExecutable: fixture.runtimeExecutable,
+      });
+      const startSidecars = vi.fn();
+      try {
+        await withRealFixtureHome(fixture, async () => {
+          await expect(startAgent24Headless(cfg, realFsDependencies(startSidecars)))
+            .rejects.toThrow(/group- or other-writable/);
+        });
+        expect(startSidecars).not.toHaveBeenCalled();
+      } finally {
+        fs.chmodSync(fixture.safeBase, 0o700); // restore before the afterEach rm, harmless either way
+      }
+    });
+
+    it("M1: rejects when resourceRoot itself (not just resourceSafeBase) is group- or other-writable", async () => {
+      if (typeof process.getuid !== "function") return;
+      const fixture = makeRealFixture();
+      fs.chmodSync(fixture.resourceRoot, 0o777);
+      const cfg = parseAgent24HeadlessConfig({
+        ...config,
+        resourceRoot: fixture.resourceRoot,
+        resourceSafeBase: fixture.safeBase,
+        runtimeExecutable: fixture.runtimeExecutable,
+      });
+      const startSidecars = vi.fn();
+      await withRealFixtureHome(fixture, async () => {
+        await expect(startAgent24Headless(cfg, realFsDependencies(startSidecars)))
+          .rejects.toThrow(/group- or other-writable/);
+      });
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("H1: rejects resourceRoot === resourceSafeBase against a real fixture", async () => {
+      if (typeof process.getuid !== "function") return;
+      const fixture = makeRealFixture();
+      const cfg = parseAgent24HeadlessConfig({
+        ...config,
+        resourceRoot: fixture.safeBase,
+        resourceSafeBase: fixture.safeBase,
+        runtimeExecutable: fixture.runtimeExecutable,
+      });
+      const startSidecars = vi.fn();
+      await withRealFixtureHome(fixture, async () => {
+        await expect(startAgent24Headless(cfg, realFsDependencies(startSidecars)))
+          .rejects.toThrow(/strictly under resourceSafeBase/);
+      });
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("rejects a real resourceRoot that shares a string prefix with resourceSafeBase but is not actually under it (base vs base-evil)", async () => {
+      if (typeof process.getuid !== "function") return;
+      const fixture = makeRealFixture();
+      const evilSibling = `${fixture.safeBase}-evil`;
+      fs.mkdirSync(evilSibling, { recursive: true, mode: 0o700 });
+      const cfg = parseAgent24HeadlessConfig({
+        ...config,
+        resourceRoot: evilSibling,
+        resourceSafeBase: fixture.safeBase,
+        runtimeExecutable: fixture.runtimeExecutable,
+      });
+      const startSidecars = vi.fn();
+      await withRealFixtureHome(fixture, async () => {
+        await expect(startAgent24Headless(cfg, realFsDependencies(startSidecars)))
+          .rejects.toThrow(/strictly under resourceSafeBase/);
+      });
       expect(startSidecars).not.toHaveBeenCalled();
     });
   });

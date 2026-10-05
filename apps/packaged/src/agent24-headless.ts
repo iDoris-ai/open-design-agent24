@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { access, readFile, realpath, stat } from "node:fs/promises";
-import { basename, isAbsolute, dirname, join, relative } from "node:path";
+import { access, lstat, readFile, realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, isAbsolute, dirname, join, relative, sep } from "node:path";
 
 import {
   APP_KEYS,
@@ -18,10 +19,20 @@ import {
 } from "./sidecars.js";
 
 // v2 (Agent24 on-demand component, 2026-10-05): adds the optional
-// resourceSafeBase config field below. v1 hosts that never set it keep the
-// exact v1 behavior (resourceSafeBase derived from runtimeExecutable's own
-// location) — only a host that explicitly sets resourceSafeBase opts into
-// the stricter, explicit trust root.
+// resourceSafeBase config field below.
+//
+// M5 (Opus re-review, 2026-10-06): to be unambiguous — protocol 1 configs
+// are NEVER accepted (parseAgent24HeadlessConfig below requires
+// raw.protocol === AGENT24_HEADLESS_PROTOCOL, i.e. exactly 2; this has not
+// changed and is not what "omitted" refers to below). What CAN be omitted
+// on an otherwise-valid protocol-2 config is only the resourceSafeBase
+// FIELD itself: a v2 config that simply doesn't set resourceSafeBase still
+// gets the exact v1-style derivation (resourceSafeBase computed from
+// runtimeExecutable's own location, with the original lenient containment
+// check) — not "v1 is accepted", but "v2 without this one optional field
+// behaves the way v1 always did". A v2 config that DOES set
+// resourceSafeBase is held to the full, stricter v2 contract below
+// (H1/H2/M1/M2/M3).
 export const AGENT24_HEADLESS_PROTOCOL = 2 as const;
 export const AGENT24_HEADLESS_NAMESPACE = "agent24-creative";
 
@@ -39,12 +50,24 @@ export type Agent24HeadlessConfig = {
    * the sibling "resources" directory next to the executable elsewhere.
    * That derivation assumes resourceRoot lives inside the packaged app, so
    * it cannot express a host that installs its resources to an external,
-   * on-demand-downloaded location. When given, resourceSafeBase MUST be:
-   * an absolute path; its own realpath (no symlink indirection — a lexical
-   * "looks like it's inside" is not accepted as a trust boundary); the
-   * literal ancestor of resourceRoot; and, on POSIX, owned by the current
+   * on-demand-downloaded location.
+   *
+   * When given, resourceSafeBase MUST be: an absolute path; its own
+   * realpath (no symlink indirection — a lexical "looks like it's inside"
+   * is not accepted as a trust boundary); a STRICT ancestor of resourceRoot
+   * (resourceRoot === resourceSafeBase is rejected — see H1 below, an entry
+   * point computed from dirname(resourceRoot) would otherwise land one
+   * level above the verified base); and, on POSIX, owned by the current
    * user with group/other write bits cleared (nothing else can swap its
-   * contents out from under this process).
+   * contents out from under this process). This POSIX ownership/mode check
+   * additionally walks every directory from $HOME down to resourceSafeBase,
+   * and from resourceSafeBase down to resourceRoot and each launcher entry
+   * point, applying the same check to each level (M1) — an ancestor a
+   * malicious party can rename/replace is just as dangerous as the base
+   * itself being writable. win32 has no equivalent ACL model implemented
+   * yet, so resourceSafeBase is rejected outright there (M2) rather than
+   * silently skipping the check the way the POSIX-only mode bits already
+   * do for a missing process.getuid.
    */
   resourceSafeBase?: string;
 };
@@ -144,62 +167,228 @@ function resolveAgent24ResourceSafeBase(runtimeExecutable: string): string {
     : join(runtimeDir, "resources");
 }
 
-function isUnderSafeBase(safeBase: string, resourceRoot: string): boolean {
-  const rel = relative(safeBase, resourceRoot);
+// H1 (Opus re-review, 2026-10-06): the v1 fallback's containment check
+// accepts resourceRoot === safeBase (rel === ""), which is fine for v1 —
+// resolveAgent24ResourceSafeBase always derives a real ancestor, never
+// something equal to resourceRoot. The v2 explicit path must not repeat
+// that leniency: resolveAgent24HeadlessEntries derives every launcher
+// entry from dirname(resourceRoot), so resourceRoot === resourceSafeBase
+// would place every entry point ONE LEVEL ABOVE the verified base —
+// entirely outside it — while resourceRoot itself still "passed"
+// containment under the lenient check. isStrictlyUnderSafeBase below is
+// what the v2 path uses instead.
+function isUnderSafeBase(safeBase: string, candidate: string): boolean {
+  const rel = relative(safeBase, candidate);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-export interface ResourceSafeBaseDependencies {
-  // Optional: only ever called on the v2 explicit-resourceSafeBase path
-  // (see assertAgent24ResourceRoot below). Existing v1-only callers/tests
-  // (no resourceSafeBase in their config) never need to supply these.
-  realpath?(path: string): Promise<string>;
-  stat?(path: string): Promise<{ uid: number; mode: number }>;
+function isStrictlyUnderSafeBase(safeBase: string, candidate: string): boolean {
+  const rel = relative(safeBase, candidate);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-const DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES: ResourceSafeBaseDependencies = {
+export interface ResourceSafeBaseDependencies {
+  // Only ever called on the v2 explicit-resourceSafeBase path (see
+  // assertAgent24ResourceRoot below). Existing v1-only callers/tests (no
+  // resourceSafeBase in their config) never need to supply these.
+  realpath?(path: string): Promise<string>;
+  /** M1 (Opus re-review): lstat, not stat — used uniformly for the
+   * $HOME-to-safeBase ancestor chain (never separately realpath'd, so a
+   * symlink there must report as itself, not be silently followed) as well
+   * as for paths that HAVE already been realpath'd (where lstat and stat
+   * give the same answer anyway). dev/ino are included for the
+   * TOCTOU re-check right before spawning — see assertAgent24ResourceRoot's
+   * returned verify(). */
+  lstat?(path: string): Promise<{ uid: number; mode: number; dev: number; ino: number }>;
+  /** Injectable for tests; defaults to node:os's real homedir(). */
+  homedir?(): string;
+}
+
+const DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES: Required<ResourceSafeBaseDependencies> = {
   realpath: async (path) => await realpath(path),
-  stat: async (path) => {
-    const info = await stat(path);
-    return { uid: info.uid, mode: info.mode };
+  lstat: async (path) => {
+    const info = await lstat(path);
+    return { uid: info.uid, mode: info.mode, dev: info.dev, ino: info.ino };
   },
+  homedir,
 };
+
+// M1: sticky-bit directories (e.g. /tmp, mode 1777) are the standard safe
+// exception to "group/other writable" — the sticky bit stops anyone but a
+// file's own owner from renaming or removing it inside such a directory,
+// which is the actual property this check cares about.
+function hasUnsafeWriteBits(mode: number): boolean {
+  if ((mode & 0o1000) !== 0) return false;
+  return (mode & 0o022) !== 0;
+}
+
+// Only called once the caller has confirmed process.platform !== "win32"
+// (see the M2 check in assertAgent24ResourceRoot), so process.getuid is
+// always available here.
+function ownerIsTrusted(uid: number): boolean {
+  return uid === process.getuid!() || uid === 0;
+}
+
+async function assertPathIsSafe(
+  targetPath: string,
+  dependencies: Required<Pick<ResourceSafeBaseDependencies, "lstat">>,
+): Promise<void> {
+  const info = await dependencies.lstat(targetPath);
+  if (!ownerIsTrusted(info.uid)) {
+    throw new Error(`agent24-headless config resourceSafeBase path is not owned by the current user or root: ${targetPath}`);
+  }
+  if (hasUnsafeWriteBits(info.mode)) {
+    throw new Error(`agent24-headless config resourceSafeBase path is group- or other-writable without the sticky bit: ${targetPath}`);
+  }
+}
+
+function chainFromAncestor(ancestor: string, target: string): string[] {
+  const rel = relative(ancestor, target);
+  if (rel === "") return [ancestor];
+  const segments = rel.split(sep).filter((segment) => segment.length > 0);
+  const chain = [ancestor];
+  let acc = ancestor;
+  for (const segment of segments) {
+    acc = join(acc, segment);
+    chain.push(acc);
+  }
+  return chain;
+}
+
+function rootToTargetChain(target: string): string[] {
+  const segments = target.split(sep).filter((segment) => segment.length > 0);
+  const chain: string[] = [];
+  let acc = "";
+  for (const segment of segments) {
+    acc = `${acc}${sep}${segment}`;
+    chain.push(acc);
+  }
+  return chain;
+}
+
+// M1: the original check only looked at resourceSafeBase itself. A
+// malicious (or merely misconfigured) ancestor directory — one that is
+// group/other-writable without the sticky bit, or owned by neither the
+// current user nor root — can rename or replace resourceSafeBase out from
+// under an otherwise-correct check, even though resourceSafeBase's OWN
+// stat looks fine at the instant it's inspected. Walk the full ancestor
+// chain from $HOME down to resourceSafeBase (or from the filesystem root,
+// if resourceSafeBase is not under $HOME), plus resourceSafeBase's own
+// subtree down to resourceRoot and each launcher entry point — the same
+// "could someone swap this out" question applies all the way down, not
+// just at the top.
+async function assertResourceSafeBaseAncestryIsSafe(
+  safeBase: string,
+  subtreeTargets: readonly string[],
+  dependencies: Required<Pick<ResourceSafeBaseDependencies, "lstat" | "homedir">>,
+): Promise<void> {
+  const home = dependencies.homedir();
+  const ancestorChain = isUnderSafeBase(home, safeBase) ? chainFromAncestor(home, safeBase) : rootToTargetChain(safeBase);
+  const subtreeChains = subtreeTargets.flatMap((target) => chainFromAncestor(safeBase, target));
+  const allPaths = new Set([...ancestorChain, ...subtreeChains]);
+  for (const target of allPaths) await assertPathIsSafe(target, dependencies);
+}
 
 async function assertAgent24ResourceRoot(
   config: Agent24HeadlessConfig,
   dependencies: ResourceSafeBaseDependencies = DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES,
-): Promise<string> {
+): Promise<{ resourceSafeBase: string; resourceRoot: string; verify(): Promise<void> }> {
   if (config.resourceSafeBase == null) {
     // v1-compatible fallback: unchanged derivation + lexical containment
-    // check. A host that never adopts resourceSafeBase keeps working
-    // exactly as before.
+    // check, no realpath, no ownership/mode checks. A host that never
+    // adopts resourceSafeBase keeps working exactly as before.
     const safeBase = resolveAgent24ResourceSafeBase(config.runtimeExecutable);
-    if (isUnderSafeBase(safeBase, config.resourceRoot)) return safeBase;
-    throw new Error("agent24-headless config resourceRoot must be under the packaged resources directory");
+    if (!isUnderSafeBase(safeBase, config.resourceRoot)) {
+      throw new Error("agent24-headless config resourceRoot must be under the packaged resources directory");
+    }
+    return { resourceSafeBase: safeBase, resourceRoot: config.resourceRoot, verify: async () => {} };
+  }
+
+  // M2: no Windows ACL model is implemented for the explicit-safe-base
+  // path yet. Fail closed rather than silently running the POSIX
+  // ownership/mode checks below, which would be meaningless on win32 (no
+  // process.getuid) and would otherwise leave this whole contract
+  // unenforced there without ever saying so.
+  if (process.platform === "win32") {
+    throw new Error("agent24-headless config resourceSafeBase is not supported on win32 yet");
   }
 
   const safeBase = config.resourceSafeBase;
-  const doRealpath = dependencies.realpath ?? DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES.realpath!;
-  const doStat = dependencies.stat ?? DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES.stat!;
-  const resolved = await doRealpath(safeBase);
-  if (resolved !== safeBase) {
+  const deps: Required<ResourceSafeBaseDependencies> = { ...DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES, ...dependencies };
+  const resolvedBase = await deps.realpath(safeBase);
+  if (resolvedBase !== safeBase) {
     throw new Error("agent24-headless config resourceSafeBase must be its own realpath (no symlink indirection)");
   }
-  if (!isUnderSafeBase(safeBase, config.resourceRoot)) {
-    throw new Error("agent24-headless config resourceRoot must be under resourceSafeBase");
+
+  // H1: resourceRoot === resourceSafeBase must be rejected — see the
+  // isUnderSafeBase doc comment above for why.
+  if (!isStrictlyUnderSafeBase(safeBase, config.resourceRoot)) {
+    throw new Error("agent24-headless config resourceRoot must be strictly under resourceSafeBase");
   }
-  // POSIX-only: Windows has no uid/mode-writable-bits model to check here,
-  // and this headless launcher is not used on Windows today.
-  if (typeof process.getuid === "function") {
-    const info = await doStat(safeBase);
-    if (info.uid !== process.getuid()) {
-      throw new Error("agent24-headless config resourceSafeBase must be owned by the current user");
-    }
-    if ((info.mode & 0o022) !== 0) {
-      throw new Error("agent24-headless config resourceSafeBase must not be group- or other-writable");
+
+  // H2: resourceRoot itself was never realpath'd before. Resolve it and
+  // re-check containment against the RESOLVED value — what a symlink
+  // somewhere inside resourceRoot's own path actually points at, not just
+  // its lexical spelling. The resolved value is what gets used everywhere
+  // downstream (paths.resourceRoot / the sidecar's OD_RESOURCE_ROOT), not
+  // the raw config value.
+  const resolvedResourceRoot = await deps.realpath(config.resourceRoot);
+  if (!isStrictlyUnderSafeBase(safeBase, resolvedResourceRoot)) {
+    throw new Error("agent24-headless config resourceRoot's realpath must be strictly under resourceSafeBase");
+  }
+
+  // H1 (entries): each launcher entry point is realpath'd and re-checked
+  // the same way — resourceRoot escaping safeBase is already caught above,
+  // but a symlink inside resourceRoot's own subtree could still make one
+  // specific entry resolve outside safeBase even while resourceRoot itself
+  // resolves fine.
+  const lexicalEntries = resolveAgent24HeadlessEntries({ ...config, resourceRoot: resolvedResourceRoot });
+  const resolvedEntries = {
+    daemonCliEntry: await deps.realpath(lexicalEntries.daemonCliEntry),
+    daemonSidecarEntry: await deps.realpath(lexicalEntries.daemonSidecarEntry),
+    webSidecarEntry: await deps.realpath(lexicalEntries.webSidecarEntry),
+    webStandaloneRoot: await deps.realpath(lexicalEntries.webStandaloneRoot),
+  };
+  for (const [field, resolvedEntry] of Object.entries(resolvedEntries)) {
+    if (!isStrictlyUnderSafeBase(safeBase, resolvedEntry)) {
+      throw new Error(`agent24-headless config ${field}'s realpath must be strictly under resourceSafeBase`);
     }
   }
-  return safeBase;
+
+  // M3: the writable state tree must never overlap the (host-enforced
+  // read-only, per Agent24's installer) resource tree — otherwise a
+  // compromised sidecar writing into its own state dir could write INTO
+  // the trusted resource tree.
+  for (const [field, candidate] of [
+    ["dataRoot", config.dataRoot],
+    ["runtimeRoot", config.runtimeRoot],
+    ["dataRoot's installation root", dirname(config.dataRoot)],
+  ] as const) {
+    if (isUnderSafeBase(safeBase, candidate)) {
+      throw new Error(`agent24-headless config ${field} must not be under resourceSafeBase`);
+    }
+  }
+
+  // M1: ownership/writability all the way from $HOME down to
+  // resourceSafeBase, and from resourceSafeBase down to resourceRoot and
+  // every entry point.
+  await assertResourceSafeBaseAncestryIsSafe(safeBase, [resolvedResourceRoot, ...Object.values(resolvedEntries)], deps);
+
+  const snapshot = await deps.lstat(safeBase);
+  return {
+    resourceSafeBase: safeBase,
+    resourceRoot: resolvedResourceRoot,
+    // M1 (TOCTOU): re-lstat safeBase right before the caller spawns
+    // anything and compare (dev, ino) against what was just verified —
+    // catches a swap landing in the window between this check and the
+    // spawn.
+    async verify() {
+      const current = await deps.lstat(safeBase);
+      if (current.dev !== snapshot.dev || current.ino !== snapshot.ino) {
+        throw new Error("agent24-headless config resourceSafeBase changed after it was verified (possible TOCTOU swap)");
+      }
+    },
+  };
 }
 
 export function resolveAgent24HeadlessEntries(config: Agent24HeadlessConfig): {
@@ -246,17 +435,26 @@ export async function startAgent24Headless(
   config: Agent24HeadlessConfig,
   dependencies: Agent24HeadlessDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<{ close(): Promise<void>; ready: Agent24HeadlessReady }> {
-  const resourceSafeBase = await assertAgent24ResourceRoot(config, dependencies);
-  const paths = resolveAgent24HeadlessPaths(config);
-  const entries = resolveAgent24HeadlessEntries(config);
+  const resolved = await assertAgent24ResourceRoot(config, dependencies);
+  // H2: everything downstream (paths.resourceRoot, entry derivation, and
+  // ultimately the sidecar's OD_RESOURCE_ROOT) uses the realpath'd
+  // resourceRoot resolved above, not the raw config value.
+  const resolvedConfig: Agent24HeadlessConfig = { ...config, resourceRoot: resolved.resourceRoot };
+  const paths = resolveAgent24HeadlessPaths(resolvedConfig);
+  const entries = resolveAgent24HeadlessEntries(resolvedConfig);
   await Promise.all([
-    dependencies.access(config.resourceRoot),
+    dependencies.access(resolvedConfig.resourceRoot),
     dependencies.access(config.runtimeExecutable),
     dependencies.access(entries.daemonCliEntry),
     dependencies.access(entries.daemonSidecarEntry),
     dependencies.access(entries.webSidecarEntry),
     dependencies.access(entries.webStandaloneRoot),
   ]);
+  // M1 (TOCTOU): re-check resourceSafeBase immediately before spawning
+  // anything — closes the window between assertAgent24ResourceRoot's
+  // checks above and actually starting the sidecars. A no-op on the v1
+  // fallback path (see assertAgent24ResourceRoot).
+  await resolved.verify();
   const runtime: SidecarRuntimeContext<SidecarStamp> = {
     app: APP_KEYS.DESKTOP,
     base: config.runtimeRoot,
@@ -278,7 +476,7 @@ export async function startAgent24Headless(
       telemetryRelayUrl: null,
       posthogKey: null,
       posthogHost: null,
-      resourceSafeBase,
+      resourceSafeBase: resolved.resourceSafeBase,
       velaWebUrl: null,
       velaWebUrls: {},
       requireDesktopAuth: false,
