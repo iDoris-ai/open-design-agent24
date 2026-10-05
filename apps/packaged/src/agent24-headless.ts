@@ -33,6 +33,26 @@ import {
 // behaves the way v1 always did". A v2 config that DOES set
 // resourceSafeBase is held to the full, stricter v2 contract below
 // (H1/H2/M1/M2/M3).
+//
+// KNOWN, DEFERRED LIMITATIONS (Codex re-review round 3, 2026-10-06 —
+// tracked here rather than silently left unmentioned; fixing either
+// properly means touching files outside this one):
+//  1. sidecars.ts's own log-opening code (openLog() and friends) opens
+//     files under subdirectories of logsRoot/desktopLogsRoot this module
+//     never individually re-validates (only the roots themselves are
+//     overlap-checked, not every per-app descendant actually opened at
+//     runtime) — a symlink planted at exactly the right descendant path
+//     (e.g. logsRoot/daemon) could still redirect a log write into
+//     resourceSafeBase without tripping anything here. Properly closing
+//     this means validating at the point sidecars.ts actually opens each
+//     file, not just validating the configured roots up front.
+//  2. This module and apps/daemon/src/daemon-paths.ts can each apply
+//     their own normalization (e.g. whitespace trimming) to the same
+//     configured path independently — if they ever disagree, this module
+//     could validate one exact string while the daemon consumes a
+//     different (but overlapping) one. Properly closing this means both
+//     sides sharing one normalization step before either validates or
+//     consumes a path, not each re-deriving its own.
 export const AGENT24_HEADLESS_PROTOCOL = 2 as const;
 export const AGENT24_HEADLESS_NAMESPACE = "agent24-creative";
 
@@ -386,17 +406,31 @@ async function assertResourceSafeBaseAncestryIsSafe(
 // directory entirely. Only treat a segment as genuinely absent when
 // lstat() on it ALSO throws ENOENT (confirms nothing exists there, not
 // even a broken symlink); anything else fails closed.
+interface NearestExistingAncestorResult {
+  /** The fully-resolved existing ancestor's realpath, with the
+   * not-yet-created suffix (if any) re-appended lexically. This is what
+   * the overlap containment check compares against safeBase. */
+  path: string;
+  /** The existing ancestor's OWN realpath, with no suffix re-appended —
+   * i.e. an actual, lstat-able filesystem object right now. Codex
+   * re-review round 3 (2026-10-06): the overlap check's conclusion is
+   * only valid for as long as THIS object stays what it was when
+   * checked; the caller snapshots it so verify() can catch it being
+   * swapped out later. */
+  existingAncestor: string;
+}
+
 async function realpathOfNearestExistingAncestor(
   target: string,
   doRealpath: (path: string) => Promise<string>,
   doLstat: (path: string) => Promise<unknown>,
-): Promise<string> {
+): Promise<NearestExistingAncestorResult> {
   let current = target;
   let suffix = "";
   for (;;) {
     try {
       const resolved = await doRealpath(current);
-      return suffix === "" ? resolved : join(resolved, suffix);
+      return { path: suffix === "" ? resolved : join(resolved, suffix), existingAncestor: resolved };
     } catch (error) {
       const code = (error as { code?: string } | null)?.code;
       if (code !== "ENOENT") {
@@ -517,12 +551,27 @@ async function assertAgent24ResourceRoot(
   // realpath() on a path that doesn't exist yet would throw) and check
   // containment in BOTH directions — neither may be nested inside the
   // other.
+  // Codex re-review round 3 (2026-10-06): the overlap conclusion below is
+  // only sound for as long as each candidate's existing ancestor stays
+  // what it was when checked — record it (via assertSubtreePathIsSafe,
+  // which also lstat's it into writableAncestorSnapshots below) so
+  // verify() can catch a later swap into resourceSafeBase. This narrows,
+  // but does not fully close, the real remaining race Codex demonstrated
+  // (the ancestor can still be swapped to something INSIDE
+  // resourceSafeBase in the instant between this lstat and the time
+  // startSidecars actually begins using it) — fully closing that would
+  // need to re-run this entire overlap check again inside verify(),
+  // which is deferred as a follow-up rather than done here.
   const derivedPaths = resolveAgent24HeadlessPaths({ ...config, resourceRoot: resolvedResourceRoot });
+  const writableAncestorSnapshots = new Map<string, LstatResult>();
   for (const [field, rawCandidate] of Object.entries(derivedPaths)) {
     if (field === "resourceRoot") continue;
-    const candidate = await realpathOfNearestExistingAncestor(rawCandidate, deps.realpath, deps.lstat);
+    const { path: candidate, existingAncestor } = await realpathOfNearestExistingAncestor(rawCandidate, deps.realpath, deps.lstat);
     if (isUnderSafeBase(safeBase, candidate) || isUnderSafeBase(candidate, safeBase)) {
       throw new Error(`agent24-headless config ${field} must not overlap resourceSafeBase`);
+    }
+    if (!writableAncestorSnapshots.has(existingAncestor)) {
+      writableAncestorSnapshots.set(existingAncestor, await deps.lstat(existingAncestor));
     }
   }
 
@@ -535,6 +584,12 @@ async function assertAgent24ResourceRoot(
   // of swap window this whole mechanism exists to close.
   const verifiedTargets = [safeBase, resolvedResourceRoot, ...Object.values(resolvedEntries)];
   const snapshots = await assertResourceSafeBaseAncestryIsSafe(safeBase, verifiedTargets, deps);
+  // Fold in the M3 writable-path ancestors snapshotted above so verify()
+  // re-checks those too, not just the resourceSafeBase side of the trust
+  // boundary.
+  for (const [path, info] of writableAncestorSnapshots) {
+    if (!snapshots.has(path)) snapshots.set(path, info);
+  }
 
   return {
     resourceSafeBase: safeBase,
