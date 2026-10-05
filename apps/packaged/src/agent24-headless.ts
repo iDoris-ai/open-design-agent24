@@ -213,12 +213,32 @@ const DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES: Required<ResourceSafeBaseDependen
   homedir,
 };
 
-// M1: sticky-bit directories (e.g. /tmp, mode 1777) are the standard safe
-// exception to "group/other writable" — the sticky bit stops anyone but a
-// file's own owner from renaming or removing it inside such a directory,
-// which is the actual property this check cares about.
-function hasUnsafeWriteBits(mode: number): boolean {
-  if ((mode & 0o1000) !== 0) return false;
+// M1 (Opus re-review round 2 / Codex, 2026-10-06): sticky-bit directories
+// (e.g. /tmp, mode 1777) are the standard safe exception to "group/other
+// writable" when they are merely a PASS-THROUGH ancestor on the way down
+// to resourceSafeBase — the sticky bit stops anyone but a file's own
+// owner from renaming or removing an EXISTING entry inside such a
+// directory, which is the property that matters for "can someone swap
+// out the next path segment". Two things Codex correctly flagged this
+// did NOT account for:
+//  - Sticky has no defined meaning for a non-directory. A `.mjs` file
+//    with mode 01666 is fully group/other-writable; its own sticky bit
+//    does nothing to stop that. The exception below is gated on
+//    `isDirectory` for exactly this reason.
+//  - resourceSafeBase ITSELF, resourceRoot, and every launcher entry
+//    point are not "pass-through" — they ARE the trust root and what
+//    gets executed. A world-writable resourceSafeBase/resourceRoot/entry
+//    is unsafe even with a sticky bit (sticky still lets anyone CREATE a
+//    new child there, which matters when the child's own name is exactly
+//    what we're about to trust). hasUnsafeSubtreeWriteBits below allows
+//    no exception at all; only the ancestor-chain walk uses the sticky
+//    exception.
+function hasUnsafeAncestorWriteBits(mode: number, isDirectory: boolean): boolean {
+  if (isDirectory && (mode & 0o1000) !== 0) return false;
+  return (mode & 0o022) !== 0;
+}
+
+function hasUnsafeSubtreeWriteBits(mode: number): boolean {
   return (mode & 0o022) !== 0;
 }
 
@@ -229,17 +249,38 @@ function ownerIsTrusted(uid: number): boolean {
   return uid === process.getuid!() || uid === 0;
 }
 
-async function assertPathIsSafe(
+type LstatResult = { uid: number; mode: number; dev: number; ino: number };
+
+async function assertAncestorPathIsSafe(
   targetPath: string,
   dependencies: Required<Pick<ResourceSafeBaseDependencies, "lstat">>,
-): Promise<void> {
+): Promise<LstatResult> {
   const info = await dependencies.lstat(targetPath);
   if (!ownerIsTrusted(info.uid)) {
-    throw new Error(`agent24-headless config resourceSafeBase path is not owned by the current user or root: ${targetPath}`);
+    throw new Error(`agent24-headless config resourceSafeBase ancestor is not owned by the current user or root: ${targetPath}`);
   }
-  if (hasUnsafeWriteBits(info.mode)) {
-    throw new Error(`agent24-headless config resourceSafeBase path is group- or other-writable without the sticky bit: ${targetPath}`);
+  // S_IFDIR = 0o040000; lstat's mode packs the file-type bits in the high
+  // bits alongside the permission bits this function otherwise only reads
+  // the low 12 of.
+  const isDirectory = (info.mode & 0o170000) === 0o040000;
+  if (hasUnsafeAncestorWriteBits(info.mode, isDirectory)) {
+    throw new Error(`agent24-headless config resourceSafeBase ancestor is group- or other-writable without the sticky bit: ${targetPath}`);
   }
+  return info;
+}
+
+async function assertSubtreePathIsSafe(
+  targetPath: string,
+  dependencies: Required<Pick<ResourceSafeBaseDependencies, "lstat">>,
+): Promise<LstatResult> {
+  const info = await dependencies.lstat(targetPath);
+  if (!ownerIsTrusted(info.uid)) {
+    throw new Error(`agent24-headless config resourceSafeBase subtree path is not owned by the current user or root: ${targetPath}`);
+  }
+  if (hasUnsafeSubtreeWriteBits(info.mode)) {
+    throw new Error(`agent24-headless config resourceSafeBase subtree path is group- or other-writable: ${targetPath}`);
+  }
+  return info;
 }
 
 function chainFromAncestor(ancestor: string, target: string): string[] {
@@ -255,9 +296,18 @@ function chainFromAncestor(ancestor: string, target: string): string[] {
   return chain;
 }
 
+// M1 (Codex, 2026-10-06): the filesystem root itself ("/") is now included
+// as the first element — it was silently skipped before. $HOME is NOT a
+// trusted anchor to start from: HOME's own parent (and every ancestor
+// above it) can just as easily be replaced/hijacked as any other level,
+// and an attacker-influenced HOME environment variable could otherwise
+// shorten the checked chain arbitrarily. Always walking from the real
+// filesystem root removes both problems — it costs a handful of extra
+// lstat calls (/, /Users, /home, etc. are cheap and, in every real
+// deployment, root-owned with no write bits anyway).
 function rootToTargetChain(target: string): string[] {
   const segments = target.split(sep).filter((segment) => segment.length > 0);
-  const chain: string[] = [];
+  const chain: string[] = [sep];
   let acc = "";
   for (const segment of segments) {
     acc = `${acc}${sep}${segment}`;
@@ -272,27 +322,74 @@ function rootToTargetChain(target: string): string[] {
 // current user nor root — can rename or replace resourceSafeBase out from
 // under an otherwise-correct check, even though resourceSafeBase's OWN
 // stat looks fine at the instant it's inspected. Walk the full ancestor
-// chain from $HOME down to resourceSafeBase (or from the filesystem root,
-// if resourceSafeBase is not under $HOME), plus resourceSafeBase's own
-// subtree down to resourceRoot and each launcher entry point — the same
-// "could someone swap this out" question applies all the way down, not
-// just at the top.
+// chain from the filesystem root down to resourceSafeBase (sticky bit
+// excepted — these are pass-through directories like /tmp or /Users),
+// plus resourceSafeBase's own subtree down to resourceRoot and each
+// launcher entry point (no sticky exception there — see
+// hasUnsafeSubtreeWriteBits above). Returns every (dev, ino) it looked at,
+// keyed by path, so the caller can later re-check the exact same set
+// right before spawning anything (see the TOCTOU re-check in
+// assertAgent24ResourceRoot's returned verify()).
 async function assertResourceSafeBaseAncestryIsSafe(
   safeBase: string,
   subtreeTargets: readonly string[],
-  dependencies: Required<Pick<ResourceSafeBaseDependencies, "lstat" | "homedir">>,
-): Promise<void> {
-  const home = dependencies.homedir();
-  const ancestorChain = isUnderSafeBase(home, safeBase) ? chainFromAncestor(home, safeBase) : rootToTargetChain(safeBase);
+  dependencies: Required<Pick<ResourceSafeBaseDependencies, "lstat">>,
+): Promise<Map<string, LstatResult>> {
+  const snapshots = new Map<string, LstatResult>();
+  const ancestorChain = rootToTargetChain(safeBase);
+  for (const target of ancestorChain) {
+    // The LAST element of ancestorChain is safeBase itself — it belongs to
+    // the strict (no sticky exception) subtree rule, not the ancestor
+    // rule, since it IS the trust root rather than a pass-through on the
+    // way to it.
+    const isSafeBaseItself = target === safeBase;
+    const info = isSafeBaseItself
+      ? await assertSubtreePathIsSafe(target, dependencies)
+      : await assertAncestorPathIsSafe(target, dependencies);
+    snapshots.set(target, info);
+  }
   const subtreeChains = subtreeTargets.flatMap((target) => chainFromAncestor(safeBase, target));
-  const allPaths = new Set([...ancestorChain, ...subtreeChains]);
-  for (const target of allPaths) await assertPathIsSafe(target, dependencies);
+  for (const target of subtreeChains) {
+    if (snapshots.has(target)) continue;
+    snapshots.set(target, await assertSubtreePathIsSafe(target, dependencies));
+  }
+  return snapshots;
+}
+
+// M3 helper: dataRoot/runtimeRoot are typically created by a LATER step
+// (resolveAgent24HeadlessPaths's consumers, or startPackagedSidecars
+// itself) — a bare realpath() on a path that doesn't exist yet throws.
+// Walk up until an existing ancestor is found, realpath THAT, then
+// re-append the not-yet-created suffix lexically (safe: a path segment
+// that doesn't exist yet cannot be a symlink).
+async function realpathOfNearestExistingAncestor(
+  target: string,
+  doRealpath: (path: string) => Promise<string>,
+): Promise<string> {
+  let current = target;
+  let suffix = "";
+  for (;;) {
+    try {
+      const resolved = await doRealpath(current);
+      return suffix === "" ? resolved : join(resolved, suffix);
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) throw new Error(`unable to resolve any existing ancestor of ${target}`);
+      suffix = suffix === "" ? basename(current) : join(basename(current), suffix);
+      current = parent;
+    }
+  }
 }
 
 async function assertAgent24ResourceRoot(
   config: Agent24HeadlessConfig,
   dependencies: ResourceSafeBaseDependencies = DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES,
-): Promise<{ resourceSafeBase: string; resourceRoot: string; verify(): Promise<void> }> {
+): Promise<{
+  resourceSafeBase: string;
+  resourceRoot: string;
+  resolvedEntries: ReturnType<typeof resolveAgent24HeadlessEntries>;
+  verify(): Promise<void>;
+}> {
   if (config.resourceSafeBase == null) {
     // v1-compatible fallback: unchanged derivation + lexical containment
     // check, no realpath, no ownership/mode checks. A host that never
@@ -301,7 +398,12 @@ async function assertAgent24ResourceRoot(
     if (!isUnderSafeBase(safeBase, config.resourceRoot)) {
       throw new Error("agent24-headless config resourceRoot must be under the packaged resources directory");
     }
-    return { resourceSafeBase: safeBase, resourceRoot: config.resourceRoot, verify: async () => {} };
+    return {
+      resourceSafeBase: safeBase,
+      resourceRoot: config.resourceRoot,
+      resolvedEntries: resolveAgent24HeadlessEntries(config),
+      verify: async () => {},
+    };
   }
 
   // M2: no Windows ACL model is implemented for the explicit-safe-base
@@ -355,37 +457,63 @@ async function assertAgent24ResourceRoot(
     }
   }
 
-  // M3: the writable state tree must never overlap the (host-enforced
-  // read-only, per Agent24's installer) resource tree — otherwise a
-  // compromised sidecar writing into its own state dir could write INTO
-  // the trusted resource tree.
-  for (const [field, candidate] of [
+  // M3 (Codex, 2026-10-06): the writable state tree must never overlap the
+  // (host-enforced read-only, per Agent24's installer) resource tree —
+  // otherwise a compromised sidecar writing into its own state dir could
+  // write INTO the trusted resource tree. The original version of this
+  // check compared the RAW config values and only checked one direction.
+  // Fixed: realpath each candidate first (falling back to the nearest
+  // EXISTING ancestor's realpath, re-appending the not-yet-created
+  // suffix, since dataRoot/runtimeRoot are typically created by a later
+  // step and a bare realpath() on a path that doesn't exist yet would
+  // throw) and check containment in BOTH directions — neither may be
+  // nested inside the other.
+  for (const [field, rawCandidate] of [
     ["dataRoot", config.dataRoot],
     ["runtimeRoot", config.runtimeRoot],
     ["dataRoot's installation root", dirname(config.dataRoot)],
   ] as const) {
-    if (isUnderSafeBase(safeBase, candidate)) {
-      throw new Error(`agent24-headless config ${field} must not be under resourceSafeBase`);
+    const candidate = await realpathOfNearestExistingAncestor(rawCandidate, deps.realpath);
+    if (isUnderSafeBase(safeBase, candidate) || isUnderSafeBase(candidate, safeBase)) {
+      throw new Error(`agent24-headless config ${field} must not overlap resourceSafeBase`);
     }
   }
 
-  // M1: ownership/writability all the way from $HOME down to
-  // resourceSafeBase, and from resourceSafeBase down to resourceRoot and
-  // every entry point.
-  await assertResourceSafeBaseAncestryIsSafe(safeBase, [resolvedResourceRoot, ...Object.values(resolvedEntries)], deps);
+  // M1: ownership/writability all the way from the filesystem root down
+  // to resourceSafeBase, and from resourceSafeBase down to resourceRoot
+  // and every entry point. Reuses these same lstat results as the TOCTOU
+  // baseline below instead of taking a separate, later snapshot — Codex
+  // correctly flagged that a fresh lstat taken AFTER all the checks above
+  // have their own (now-discarded) lstat results opens exactly the kind
+  // of swap window this whole mechanism exists to close.
+  const verifiedTargets = [safeBase, resolvedResourceRoot, ...Object.values(resolvedEntries)];
+  const snapshots = await assertResourceSafeBaseAncestryIsSafe(safeBase, verifiedTargets, deps);
 
-  const snapshot = await deps.lstat(safeBase);
   return {
     resourceSafeBase: safeBase,
     resourceRoot: resolvedResourceRoot,
-    // M1 (TOCTOU): re-lstat safeBase right before the caller spawns
-    // anything and compare (dev, ino) against what was just verified —
-    // catches a swap landing in the window between this check and the
-    // spawn.
+    resolvedEntries,
+    // M1 (TOCTOU): re-lstat EVERY verified target (resourceSafeBase,
+    // resourceRoot, and every entry point — not just resourceSafeBase)
+    // right before the caller spawns anything, comparing each against
+    // the snapshot captured during the checks above. Still not a
+    // complete close of every TOCTOU window: `dependencies.startSidecars`
+    // itself runs further async steps after this (directory creation,
+    // sidecar prewarming, the daemon becoming ready before the web
+    // sidecar even starts, and any later restart of either) during which
+    // nothing re-verifies anything. Fully eliminating that would need
+    // opening these paths once and executing from the resulting file
+    // descriptors rather than by path again later — out of scope for this
+    // change; documented here as a known, accepted residual gap rather
+    // than silently pretending this closes it completely.
     async verify() {
-      const current = await deps.lstat(safeBase);
-      if (current.dev !== snapshot.dev || current.ino !== snapshot.ino) {
-        throw new Error("agent24-headless config resourceSafeBase changed after it was verified (possible TOCTOU swap)");
+      for (const target of verifiedTargets) {
+        const expected = snapshots.get(target);
+        if (expected == null) continue;
+        const current = await deps.lstat(target);
+        if (current.dev !== expected.dev || current.ino !== expected.ino) {
+          throw new Error(`agent24-headless config path changed after it was verified (possible TOCTOU swap): ${target}`);
+        }
       }
     },
   };
@@ -441,7 +569,16 @@ export async function startAgent24Headless(
   // resourceRoot resolved above, not the raw config value.
   const resolvedConfig: Agent24HeadlessConfig = { ...config, resourceRoot: resolved.resourceRoot };
   const paths = resolveAgent24HeadlessPaths(resolvedConfig);
-  const entries = resolveAgent24HeadlessEntries(resolvedConfig);
+  // Codex (2026-10-06): this used to call resolveAgent24HeadlessEntries(
+  // resolvedConfig) again here, discarding the realpath'd+verified
+  // entries assertAgent24ResourceRoot just computed and checked, and using
+  // freshly-recomputed LEXICAL ones instead — a symlink inside
+  // resourceRoot's own subtree (e.g. the "app" directory itself) could
+  // resolve its entries outside resourceSafeBase despite having just been
+  // rejected by that exact check, because the entries actually used for
+  // access()/spawn were never the ones that check validated. Reuse the
+  // already-verified resolvedEntries directly instead of recomputing.
+  const entries = resolved.resolvedEntries;
   await Promise.all([
     dependencies.access(resolvedConfig.resourceRoot),
     dependencies.access(config.runtimeExecutable),

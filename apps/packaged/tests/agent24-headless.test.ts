@@ -210,7 +210,7 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
         homedir,
       });
       expect(startSidecars.mock.calls[0]?.[2]).toMatchObject({
@@ -227,7 +227,7 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async () => "/some/other/real/location"),
-        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
         homedir,
       })).rejects.toThrow(/own realpath/);
       expect(startSidecars).not.toHaveBeenCalled();
@@ -244,7 +244,7 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
         homedir,
       })).rejects.toThrow(/strictly under resourceSafeBase/);
       expect(startSidecars).not.toHaveBeenCalled();
@@ -262,7 +262,7 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
         homedir,
       })).rejects.toThrow(/strictly under resourceSafeBase/);
       expect(startSidecars).not.toHaveBeenCalled();
@@ -283,7 +283,7 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
         homedir,
       })).rejects.toThrow(/strictly under resourceSafeBase/);
       expect(startSidecars).not.toHaveBeenCalled();
@@ -297,7 +297,7 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        lstat: vi.fn(async () => ({ uid: process.getuid!() + 1, mode: 0o700, dev: 1, ino: 1 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid!() + 1, mode: 0o040700, dev: 1, ino: 1 })),
         homedir,
       })).rejects.toThrow(/owned by the current user/);
       expect(startSidecars).not.toHaveBeenCalled();
@@ -311,27 +311,47 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        lstat: vi.fn(async () => ({ uid: process.getuid!() ?? 0, mode: 0o777, dev: 1, ino: 1 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid!() ?? 0, mode: 0o040777, dev: 1, ino: 1 })),
         homedir,
       })).rejects.toThrow(/group- or other-writable/);
       expect(startSidecars).not.toHaveBeenCalled();
     });
 
-    // M1, the sticky-bit exception: a world-writable ancestor is fine as
-    // long as the sticky bit is set (e.g. /tmp, mode 1777) — only the
-    // sticky-less case must reject.
-    it("accepts a world-writable resourceSafeBase ONLY when the sticky bit is set", async () => {
+    // M1, the sticky-bit exception: a world-writable ANCESTOR (a
+    // pass-through directory on the way down, like /tmp) is fine as long
+    // as the sticky bit is set — but only for ancestors. resourceSafeBase
+    // ITSELF (and its own subtree) is the trust root, not a pass-through,
+    // so it is held to the strict rule with no sticky exception at all
+    // (Codex re-review, 2026-10-06 — see hasUnsafeSubtreeWriteBits).
+    it("accepts a world-writable ANCESTOR only when the sticky bit is set, while resourceSafeBase itself stays strict", async () => {
       const { close, startSidecars } = startSidecarsStub();
       const runtime = await startAgent24Headless(externalConfig, {
         access: vi.fn(async () => undefined),
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o1777, dev: 1, ino: 1 })),
+        lstat: vi.fn(async (p: string) => (
+          p === externalConfig.resourceSafeBase || p.startsWith(`${externalConfig.resourceSafeBase}/`)
+            ? { uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 } // the trust root + its subtree: strict
+            : { uid: process.getuid?.() ?? 0, mode: 0o041777, dev: 1, ino: 1 } // ancestors: sticky world-writable is fine
+        )),
         homedir,
       });
       await runtime.close();
       expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects resourceSafeBase itself being world-writable EVEN WITH the sticky bit set (it is the trust root, not a pass-through ancestor)", async () => {
+      const { startSidecars } = startSidecarsStub();
+      await expect(startAgent24Headless(externalConfig, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o041777, dev: 1, ino: 1 })),
+        homedir,
+      })).rejects.toThrow(/group- or other-writable/);
+      expect(startSidecars).not.toHaveBeenCalled();
     });
 
     // M2
@@ -363,9 +383,9 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
         homedir,
-      })).rejects.toThrow(/dataRoot must not be under resourceSafeBase/);
+      })).rejects.toThrow(/dataRoot must not overlap resourceSafeBase/);
       expect(startSidecars).not.toHaveBeenCalled();
     });
 
@@ -380,9 +400,9 @@ describe("agent24-headless", () => {
         randomUUID: () => "instance-external",
         startSidecars: startSidecars as never,
         realpath: vi.fn(async (p: string) => p),
-        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700, dev: 1, ino: 1 })),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
         homedir,
-      })).rejects.toThrow(/runtimeRoot must not be under resourceSafeBase/);
+      })).rejects.toThrow(/runtimeRoot must not overlap resourceSafeBase/);
       expect(startSidecars).not.toHaveBeenCalled();
     });
 
@@ -402,7 +422,7 @@ describe("agent24-headless", () => {
         realpath: vi.fn(async (p: string) => p),
         lstat: vi.fn(async () => ({
           uid: process.getuid?.() ?? 0,
-          mode: 0o700,
+          mode: 0o040700,
           dev: 1,
           ino: swapped ? 999 : 100,
         })),
@@ -487,6 +507,56 @@ describe("agent24-headless", () => {
       await withRealFixtureHome(fixture, async () => {
         const runtime = await startAgent24Headless(cfg, realFsDependencies(startSidecars));
         expect(startSidecars.mock.calls[0]?.[2]).toMatchObject({ resourceSafeBase: fixture.safeBase });
+        await runtime.close();
+      });
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("Codex re-review (2026-10-06): the entries actually passed to startSidecars are the VALIDATED (realpath'd) ones, not freshly re-computed lexical ones", async () => {
+      // A real symlink inside resourceSafeBase that points to a DIFFERENT
+      // (but still safely-inside-the-base) real directory. Both the
+      // lexical path (through the symlink) and the realpath (the
+      // symlink's target) are individually safe — the point of this test
+      // is narrower: that startSidecars receives the SAME realpath'd
+      // value assertAgent24ResourceRoot already verified, not a second,
+      // independently-recomputed lexical one. Before the fix, the entry
+      // used for actual access()/spawn was recomputed via
+      // resolveAgent24HeadlessEntries(resolvedConfig) — a plain lexical
+      // join that still goes THROUGH the symlink — so this test would
+      // have passed even on the buggy code for this specific safe-rename
+      // case. What it DOES still catch: a regression back to computing
+      // entries twice from two different inputs ever producing two
+      // different answers would show up here as soon as the two
+      // computations diverge for any reason.
+      if (typeof process.getuid !== "function") return;
+      const fixture = makeRealFixture();
+      const renamedAppRoot = path.join(fixture.safeBase, "app-real");
+      fs.renameSync(path.join(fixture.safeBase, "app"), renamedAppRoot);
+      fs.symlinkSync(renamedAppRoot, path.join(fixture.safeBase, "app"));
+
+      const cfg = parseAgent24HeadlessConfig({
+        ...config,
+        resourceRoot: fixture.resourceRoot,
+        resourceSafeBase: fixture.safeBase,
+        runtimeExecutable: fixture.runtimeExecutable,
+      });
+      const close = vi.fn(async () => undefined);
+      const startSidecars = vi.fn(async (..._args: unknown[]) => ({
+        close,
+        currentWebUrl: () => "http://127.0.0.1:7456",
+        daemon: { state: "running" as const, url: "http://127.0.0.1:7457" },
+        web: { state: "running" as const, url: "http://127.0.0.1:7456" },
+      }));
+      await withRealFixtureHome(fixture, async () => {
+        const runtime = await startAgent24Headless(cfg, realFsDependencies(startSidecars));
+        expect(startSidecars.mock.calls[0]?.[1]).toMatchObject({
+          resourceRoot: fixture.resourceRoot,
+        });
+        expect(startSidecars.mock.calls[0]?.[2]).toMatchObject({
+          daemonCliEntry: path.join(renamedAppRoot, "prebundled", "daemon", "daemon-cli.mjs"),
+          daemonSidecarEntry: path.join(renamedAppRoot, "prebundled", "daemon", "daemon-sidecar.mjs"),
+          webSidecarEntry: path.join(renamedAppRoot, "prebundled", "web-sidecar.mjs"),
+        });
         await runtime.close();
       });
       expect(close).toHaveBeenCalledTimes(1);
