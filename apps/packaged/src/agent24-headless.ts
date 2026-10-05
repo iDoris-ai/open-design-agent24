@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, dirname, join, relative } from "node:path";
 
 import {
@@ -17,7 +17,12 @@ import {
   type PackagedSidecarHandle,
 } from "./sidecars.js";
 
-export const AGENT24_HEADLESS_PROTOCOL = 1 as const;
+// v2 (Agent24 on-demand component, 2026-10-05): adds the optional
+// resourceSafeBase config field below. v1 hosts that never set it keep the
+// exact v1 behavior (resourceSafeBase derived from runtimeExecutable's own
+// location) — only a host that explicitly sets resourceSafeBase opts into
+// the stricter, explicit trust root.
+export const AGENT24_HEADLESS_PROTOCOL = 2 as const;
 export const AGENT24_HEADLESS_NAMESPACE = "agent24-creative";
 
 export type Agent24HeadlessConfig = {
@@ -27,6 +32,21 @@ export type Agent24HeadlessConfig = {
   dataRoot: string;
   runtimeRoot: string;
   runtimeExecutable: string;
+  /**
+   * Explicit trust root for resourceRoot (v2, optional). When omitted, the
+   * trust root is derived from runtimeExecutable's own location exactly as
+   * protocol v1 always did — the app bundle's own Resources dir on mac, or
+   * the sibling "resources" directory next to the executable elsewhere.
+   * That derivation assumes resourceRoot lives inside the packaged app, so
+   * it cannot express a host that installs its resources to an external,
+   * on-demand-downloaded location. When given, resourceSafeBase MUST be:
+   * an absolute path; its own realpath (no symlink indirection — a lexical
+   * "looks like it's inside" is not accepted as a trust boundary); the
+   * literal ancestor of resourceRoot; and, on POSIX, owned by the current
+   * user with group/other write bits cleared (nothing else can swap its
+   * contents out from under this process).
+   */
+  resourceSafeBase?: string;
 };
 
 export type Agent24HeadlessReady = {
@@ -49,6 +69,7 @@ const CONFIG_KEYS = new Set([
   "dataRoot",
   "runtimeRoot",
   "runtimeExecutable",
+  "resourceSafeBase",
 ]);
 
 function requireNonEmptyString(value: unknown, field: string): string {
@@ -89,6 +110,9 @@ export function parseAgent24HeadlessConfig(value: unknown): Agent24HeadlessConfi
     dataRoot: requireAbsolutePath(raw.dataRoot, "dataRoot"),
     runtimeRoot: requireAbsolutePath(raw.runtimeRoot, "runtimeRoot"),
     runtimeExecutable: requireAbsolutePath(raw.runtimeExecutable, "runtimeExecutable"),
+    resourceSafeBase: raw.resourceSafeBase == null
+      ? undefined
+      : requireAbsolutePath(raw.resourceSafeBase, "resourceSafeBase"),
   };
 }
 
@@ -120,11 +144,62 @@ function resolveAgent24ResourceSafeBase(runtimeExecutable: string): string {
     : join(runtimeDir, "resources");
 }
 
-function assertAgent24ResourceRoot(config: Agent24HeadlessConfig): string {
-  const safeBase = resolveAgent24ResourceSafeBase(config.runtimeExecutable);
-  const rel = relative(safeBase, config.resourceRoot);
-  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return safeBase;
-  throw new Error("agent24-headless config resourceRoot must be under the packaged resources directory");
+function isUnderSafeBase(safeBase: string, resourceRoot: string): boolean {
+  const rel = relative(safeBase, resourceRoot);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+export interface ResourceSafeBaseDependencies {
+  // Optional: only ever called on the v2 explicit-resourceSafeBase path
+  // (see assertAgent24ResourceRoot below). Existing v1-only callers/tests
+  // (no resourceSafeBase in their config) never need to supply these.
+  realpath?(path: string): Promise<string>;
+  stat?(path: string): Promise<{ uid: number; mode: number }>;
+}
+
+const DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES: ResourceSafeBaseDependencies = {
+  realpath: async (path) => await realpath(path),
+  stat: async (path) => {
+    const info = await stat(path);
+    return { uid: info.uid, mode: info.mode };
+  },
+};
+
+async function assertAgent24ResourceRoot(
+  config: Agent24HeadlessConfig,
+  dependencies: ResourceSafeBaseDependencies = DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES,
+): Promise<string> {
+  if (config.resourceSafeBase == null) {
+    // v1-compatible fallback: unchanged derivation + lexical containment
+    // check. A host that never adopts resourceSafeBase keeps working
+    // exactly as before.
+    const safeBase = resolveAgent24ResourceSafeBase(config.runtimeExecutable);
+    if (isUnderSafeBase(safeBase, config.resourceRoot)) return safeBase;
+    throw new Error("agent24-headless config resourceRoot must be under the packaged resources directory");
+  }
+
+  const safeBase = config.resourceSafeBase;
+  const doRealpath = dependencies.realpath ?? DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES.realpath!;
+  const doStat = dependencies.stat ?? DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES.stat!;
+  const resolved = await doRealpath(safeBase);
+  if (resolved !== safeBase) {
+    throw new Error("agent24-headless config resourceSafeBase must be its own realpath (no symlink indirection)");
+  }
+  if (!isUnderSafeBase(safeBase, config.resourceRoot)) {
+    throw new Error("agent24-headless config resourceRoot must be under resourceSafeBase");
+  }
+  // POSIX-only: Windows has no uid/mode-writable-bits model to check here,
+  // and this headless launcher is not used on Windows today.
+  if (typeof process.getuid === "function") {
+    const info = await doStat(safeBase);
+    if (info.uid !== process.getuid()) {
+      throw new Error("agent24-headless config resourceSafeBase must be owned by the current user");
+    }
+    if ((info.mode & 0o022) !== 0) {
+      throw new Error("agent24-headless config resourceSafeBase must not be group- or other-writable");
+    }
+  }
+  return safeBase;
 }
 
 export function resolveAgent24HeadlessEntries(config: Agent24HeadlessConfig): {
@@ -154,7 +229,7 @@ function requireLoopbackHttpOrigin(raw: string | null | undefined, field: string
   return parsed.origin;
 }
 
-export interface Agent24HeadlessDependencies {
+export interface Agent24HeadlessDependencies extends ResourceSafeBaseDependencies {
   access(path: string): Promise<void>;
   randomUUID(): string;
   startSidecars: typeof startPackagedSidecars;
@@ -164,13 +239,14 @@ const DEFAULT_DEPENDENCIES: Agent24HeadlessDependencies = {
   access: async (path) => await access(path),
   randomUUID,
   startSidecars: startPackagedSidecars,
+  ...DEFAULT_RESOURCE_SAFE_BASE_DEPENDENCIES,
 };
 
 export async function startAgent24Headless(
   config: Agent24HeadlessConfig,
   dependencies: Agent24HeadlessDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<{ close(): Promise<void>; ready: Agent24HeadlessReady }> {
-  const resourceSafeBase = assertAgent24ResourceRoot(config);
+  const resourceSafeBase = await assertAgent24ResourceRoot(config, dependencies);
   const paths = resolveAgent24HeadlessPaths(config);
   const entries = resolveAgent24HeadlessEntries(config);
   await Promise.all([

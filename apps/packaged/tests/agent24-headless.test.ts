@@ -21,7 +21,7 @@ describe("agent24-headless", () => {
   it("accepts only the frozen host-managed config surface", () => {
     expect(() => parseAgent24HeadlessConfig({ ...config, rendererPath: "/tmp/user" })).toThrow(/unsupported field/);
     expect(() => parseAgent24HeadlessConfig({ ...config, resourceRoot: "relative" })).toThrow(/must be absolute/);
-    expect(() => parseAgent24HeadlessConfig({ ...config, protocol: 2 })).toThrow(/protocol/);
+    expect(() => parseAgent24HeadlessConfig({ ...config, protocol: 1 })).toThrow(/protocol/);
   });
 
   it("derives daemon and web entries from the pinned resource root", () => {
@@ -72,7 +72,7 @@ describe("agent24-headless", () => {
     });
     expect(runtime.ready).toEqual({
       type: "ready",
-      protocol: 1,
+      protocol: 2,
       instanceId: "instance-1",
       pinVersion: "0.22.2",
       webOrigin: "http://127.0.0.1:7456",
@@ -135,5 +135,103 @@ describe("agent24-headless", () => {
       })) as never,
     })).rejects.toThrow(/127\.0\.0\.1/);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  describe("v2 explicit resourceSafeBase (on-demand / externally-installed resources)", () => {
+    // The externally-installed resourceRoot no longer lives anywhere near
+    // runtimeExecutable (e.g. ~/.agent24/components/open-design/<hash>/ on
+    // Agent24) — the old runtimeExecutable-derived safe base can never
+    // contain it. An explicit, independently-verified resourceSafeBase is
+    // the only way to accept this layout without lexical tricks (symlinks)
+    // that a real filesystem boundary (readonly AppImage mount, /opt
+    // permissions, a signed .app bundle) would reject anyway.
+    const externalConfig = parseAgent24HeadlessConfig({
+      ...config,
+      resourceRoot: "/home/user/.agent24/components/open-design/abc1234-linux-x64/open-design",
+      resourceSafeBase: "/home/user/.agent24/components/open-design/abc1234-linux-x64",
+    });
+
+    function startSidecarsStub() {
+      const close = vi.fn(async () => undefined);
+      return {
+        close,
+        startSidecars: vi.fn(async (..._args: unknown[]) => ({
+          close,
+          currentWebUrl: () => "http://127.0.0.1:7456",
+          daemon: { state: "running" as const, url: "http://127.0.0.1:7457" },
+          web: { state: "running" as const, url: "http://127.0.0.1:7456" },
+        })),
+      };
+    }
+
+    it("accepts a resourceSafeBase that is its own realpath, owned by the current uid, and not group/other-writable", async () => {
+      const { close, startSidecars } = startSidecarsStub();
+      const runtime = await startAgent24Headless(externalConfig, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        stat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700 })),
+      });
+      expect(startSidecars.mock.calls[0]?.[2]).toMatchObject({
+        resourceSafeBase: externalConfig.resourceSafeBase,
+      });
+      await runtime.close();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a resourceSafeBase that is not its own realpath (symlink indirection)", async () => {
+      const { startSidecars } = startSidecarsStub();
+      await expect(startAgent24Headless(externalConfig, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async () => "/some/other/real/location"),
+        stat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700 })),
+      })).rejects.toThrow(/own realpath/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("rejects a resourceRoot that is not under the explicit resourceSafeBase", async () => {
+      const { startSidecars } = startSidecarsStub();
+      const escaped = parseAgent24HeadlessConfig({
+        ...externalConfig,
+        resourceRoot: "/home/user/.agent24/components/open-design/other-hash/open-design",
+      });
+      await expect(startAgent24Headless(escaped, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        stat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o700 })),
+      })).rejects.toThrow(/must be under resourceSafeBase/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("rejects a resourceSafeBase owned by a different uid", async () => {
+      if (typeof process.getuid !== "function") return; // POSIX-only check
+      const { startSidecars } = startSidecarsStub();
+      await expect(startAgent24Headless(externalConfig, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        stat: vi.fn(async () => ({ uid: process.getuid!() + 1, mode: 0o700 })),
+      })).rejects.toThrow(/owned by the current user/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("rejects a resourceSafeBase that is group- or other-writable", async () => {
+      if (typeof process.getuid !== "function") return; // POSIX-only check
+      const { startSidecars } = startSidecarsStub();
+      await expect(startAgent24Headless(externalConfig, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        stat: vi.fn(async () => ({ uid: process.getuid!() ?? 0, mode: 0o777 })),
+      })).rejects.toThrow(/group- or other-writable/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
   });
 });
