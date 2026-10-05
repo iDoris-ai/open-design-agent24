@@ -402,7 +402,12 @@ describe("agent24-headless", () => {
         realpath: vi.fn(async (p: string) => p),
         lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
         homedir,
-      })).rejects.toThrow(/runtimeRoot must not overlap resourceSafeBase/);
+        // M3 now checks every path resolveAgent24HeadlessPaths derives from
+        // runtimeRoot (cacheRoot, logsRoot, etc.), not just runtimeRoot
+        // itself — any of them legitimately overlapping is a correct
+        // rejection, so match generically rather than pinning the exact
+        // field name that happens to be checked first.
+      })).rejects.toThrow(/must not overlap resourceSafeBase/);
       expect(startSidecars).not.toHaveBeenCalled();
     });
 
@@ -428,6 +433,113 @@ describe("agent24-headless", () => {
         })),
         homedir,
       })).rejects.toThrow(/TOCTOU swap/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("M1 TOCTOU (Codex re-review round 2, 2026-10-06): rejects when an INTERMEDIATE ancestor directory's (dev, ino) changed, not just resourceSafeBase itself", async () => {
+      const { startSidecars } = startSidecarsStub();
+      let swapped = false;
+      const intermediate = "/home/user/.agent24";
+      await expect(startAgent24Headless(externalConfig, {
+        access: vi.fn(async () => { swapped = true; }),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async (p: string) => ({
+          uid: process.getuid?.() ?? 0,
+          mode: 0o040700,
+          dev: 1,
+          ino: p === intermediate && swapped ? 999 : 100,
+        })),
+        homedir,
+      })).rejects.toThrow(/TOCTOU swap/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("M1 TOCTOU (Codex re-review round 2): rejects when resourceSafeBase's mode changed IN PLACE (same inode, different — now unsafe — permissions)", async () => {
+      const { startSidecars } = startSidecarsStub();
+      let swapped = false;
+      await expect(startAgent24Headless(externalConfig, {
+        access: vi.fn(async () => { swapped = true; }),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async (p: string) => ({
+          uid: process.getuid?.() ?? 0,
+          mode: p === externalConfig.resourceSafeBase && swapped ? 0o040777 : 0o040700,
+          dev: 1,
+          ino: 100,
+        })),
+        homedir,
+      })).rejects.toThrow(/TOCTOU swap/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("M3 (Codex re-review round 2): detects resourceSafeBase nested under runtimeRoot even when resourceSafeBase's own name starts with \"..\" (not a naive string-prefix escape)", async () => {
+      const { startSidecars } = startSidecarsStub();
+      const weirdlyNamedBase = "/home/user/.agent24/components/open-design/..bundle";
+      const cfg = parseAgent24HeadlessConfig({
+        ...externalConfig,
+        resourceSafeBase: weirdlyNamedBase,
+        resourceRoot: `${weirdlyNamedBase}/open-design`,
+        runtimeRoot: "/home/user/.agent24/components/open-design",
+      });
+      await expect(startAgent24Headless(cfg, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
+        homedir,
+      })).rejects.toThrow(/must not overlap resourceSafeBase/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("M3 (Codex re-review round 2): rejects when a path DERIVED from runtimeRoot (cacheRoot) equals resourceSafeBase, even though runtimeRoot itself is a disjoint sibling", async () => {
+      const { startSidecars } = startSidecarsStub();
+      const namespaceRoot = "/home/user/.agent24/components/open-design/ns";
+      const cfg = parseAgent24HeadlessConfig({
+        ...externalConfig,
+        resourceSafeBase: `${namespaceRoot}/cache`,
+        resourceRoot: `${namespaceRoot}/cache/open-design`,
+        runtimeRoot: `${namespaceRoot}/runtime`,
+      });
+      await expect(startAgent24Headless(cfg, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => p),
+        lstat: vi.fn(async () => ({ uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 })),
+        homedir,
+      })).rejects.toThrow(/cacheRoot must not overlap resourceSafeBase/);
+      expect(startSidecars).not.toHaveBeenCalled();
+    });
+
+    it("M3 (Codex re-review round 2): fails closed when dataRoot's path contains an existing-but-unresolvable entry (e.g. a dangling symlink), rather than treating it as not-yet-created", async () => {
+      const { startSidecars } = startSidecarsStub();
+      const danglingLink = "/home/user/.agent24/dangling-link";
+      const danglingPath = `${danglingLink}/data`;
+      const enoent = (): NodeJS.ErrnoException => {
+        const error = new Error("ENOENT") as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        return error;
+      };
+      const cfg = parseAgent24HeadlessConfig({ ...externalConfig, dataRoot: danglingPath });
+      await expect(startAgent24Headless(cfg, {
+        access: vi.fn(async () => undefined),
+        randomUUID: () => "instance-external",
+        startSidecars: startSidecars as never,
+        realpath: vi.fn(async (p: string) => {
+          if (p === danglingPath || p === danglingLink) throw enoent();
+          return p;
+        }),
+        lstat: vi.fn(async (p: string) => {
+          if (p === danglingPath) throw enoent(); // not created yet — genuinely absent
+          if (p === danglingLink) return { uid: process.getuid?.() ?? 0, mode: 0o120777, dev: 1, ino: 1 }; // exists: a dangling symlink
+          return { uid: process.getuid?.() ?? 0, mode: 0o040700, dev: 1, ino: 1 };
+        }),
+        homedir,
+      })).rejects.toThrow(/existing but unresolvable/);
       expect(startSidecars).not.toHaveBeenCalled();
     });
   });

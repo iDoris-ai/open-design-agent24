@@ -177,14 +177,27 @@ function resolveAgent24ResourceSafeBase(runtimeExecutable: string): string {
 // entirely outside it — while resourceRoot itself still "passed"
 // containment under the lenient check. isStrictlyUnderSafeBase below is
 // what the v2 path uses instead.
+// Codex re-review round 2 (2026-10-06): `rel.startsWith("..")` matches
+// not just a real ".." parent-traversal segment but also any sibling
+// whose name happens to start with those two characters — "..bundle" is
+// a perfectly legitimate directory NAME, and path.relative("/trusted",
+// "/trusted/..bundle") returns the single segment "..bundle", which the
+// naive startsWith check wrongly treated as an escape. A real
+// parent-traversal is either exactly ".." or starts with ".." followed
+// by a path separator — never just those two characters as a prefix of a
+// longer name.
+function escapesSafeBase(rel: string): boolean {
+  return rel === ".." || rel.startsWith(`..${sep}`);
+}
+
 function isUnderSafeBase(safeBase: string, candidate: string): boolean {
   const rel = relative(safeBase, candidate);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === "" || (!escapesSafeBase(rel) && !isAbsolute(rel));
 }
 
 function isStrictlyUnderSafeBase(safeBase: string, candidate: string): boolean {
   const rel = relative(safeBase, candidate);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  return rel !== "" && !escapesSafeBase(rel) && !isAbsolute(rel);
 }
 
 export interface ResourceSafeBaseDependencies {
@@ -362,9 +375,21 @@ async function assertResourceSafeBaseAncestryIsSafe(
 // Walk up until an existing ancestor is found, realpath THAT, then
 // re-append the not-yet-created suffix lexically (safe: a path segment
 // that doesn't exist yet cannot be a symlink).
+// Codex re-review round 2 (2026-10-06): the original version caught EVERY
+// realpath() error and treated it as "this path segment doesn't exist
+// yet", silently continuing to climb. That is only correct for ENOENT. A
+// dangling symlink (the entry itself EXISTS — lstat succeeds — but what
+// it points at doesn't, so realpath() throws ENOENT on the TARGET, not on
+// the entry's own absence) would be wrongly reconstructed as a plain,
+// not-yet-created path segment. EACCES/ELOOP are not "missing" either —
+// silently climbing past those risks validating against the wrong
+// directory entirely. Only treat a segment as genuinely absent when
+// lstat() on it ALSO throws ENOENT (confirms nothing exists there, not
+// even a broken symlink); anything else fails closed.
 async function realpathOfNearestExistingAncestor(
   target: string,
   doRealpath: (path: string) => Promise<string>,
+  doLstat: (path: string) => Promise<unknown>,
 ): Promise<string> {
   let current = target;
   let suffix = "";
@@ -372,7 +397,27 @@ async function realpathOfNearestExistingAncestor(
     try {
       const resolved = await doRealpath(current);
       return suffix === "" ? resolved : join(resolved, suffix);
-    } catch {
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code !== "ENOENT") {
+        throw new Error(`agent24-headless config could not resolve ${current} while checking ${target} for overlap: ${String(error)}`);
+      }
+      let existsButUnresolvable = true;
+      try {
+        await doLstat(current);
+      } catch (lstatError) {
+        const lstatCode = (lstatError as { code?: string } | null)?.code;
+        if (lstatCode === "ENOENT") existsButUnresolvable = false;
+        else throw lstatError;
+      }
+      if (existsButUnresolvable) {
+        // lstat succeeded (or threw something other than ENOENT) while
+        // realpath failed with ENOENT: current exists (e.g. a dangling
+        // symlink whose TARGET is missing) — this is not "not created
+        // yet", it's an existing, unexpected object. Fail closed rather
+        // than silently walking past it.
+        throw new Error(`agent24-headless config found an existing but unresolvable path while checking ${target} for overlap: ${current}`);
+      }
       const parent = dirname(current);
       if (parent === current) throw new Error(`unable to resolve any existing ancestor of ${target}`);
       suffix = suffix === "" ? basename(current) : join(basename(current), suffix);
@@ -460,20 +505,22 @@ async function assertAgent24ResourceRoot(
   // M3 (Codex, 2026-10-06): the writable state tree must never overlap the
   // (host-enforced read-only, per Agent24's installer) resource tree —
   // otherwise a compromised sidecar writing into its own state dir could
-  // write INTO the trusted resource tree. The original version of this
-  // check compared the RAW config values and only checked one direction.
-  // Fixed: realpath each candidate first (falling back to the nearest
+  // write INTO the trusted resource tree. Checking only dataRoot/
+  // runtimeRoot missed every path DERIVED from them (logsRoot, cacheRoot,
+  // electronUserDataRoot, ...) — sidecars.ts writes directly into several
+  // of those, not just the two raw config fields. Check every writable
+  // field resolveAgent24HeadlessPaths derives (everything except
+  // resourceRoot itself, which is expected to relate to the resource
+  // tree). realpath each candidate first (falling back to the nearest
   // EXISTING ancestor's realpath, re-appending the not-yet-created
-  // suffix, since dataRoot/runtimeRoot are typically created by a later
-  // step and a bare realpath() on a path that doesn't exist yet would
-  // throw) and check containment in BOTH directions — neither may be
-  // nested inside the other.
-  for (const [field, rawCandidate] of [
-    ["dataRoot", config.dataRoot],
-    ["runtimeRoot", config.runtimeRoot],
-    ["dataRoot's installation root", dirname(config.dataRoot)],
-  ] as const) {
-    const candidate = await realpathOfNearestExistingAncestor(rawCandidate, deps.realpath);
+  // suffix, since most of these are created by a later step and a bare
+  // realpath() on a path that doesn't exist yet would throw) and check
+  // containment in BOTH directions — neither may be nested inside the
+  // other.
+  const derivedPaths = resolveAgent24HeadlessPaths({ ...config, resourceRoot: resolvedResourceRoot });
+  for (const [field, rawCandidate] of Object.entries(derivedPaths)) {
+    if (field === "resourceRoot") continue;
+    const candidate = await realpathOfNearestExistingAncestor(rawCandidate, deps.realpath, deps.lstat);
     if (isUnderSafeBase(safeBase, candidate) || isUnderSafeBase(candidate, safeBase)) {
       throw new Error(`agent24-headless config ${field} must not overlap resourceSafeBase`);
     }
@@ -493,25 +540,36 @@ async function assertAgent24ResourceRoot(
     resourceSafeBase: safeBase,
     resourceRoot: resolvedResourceRoot,
     resolvedEntries,
-    // M1 (TOCTOU): re-lstat EVERY verified target (resourceSafeBase,
-    // resourceRoot, and every entry point — not just resourceSafeBase)
-    // right before the caller spawns anything, comparing each against
-    // the snapshot captured during the checks above. Still not a
-    // complete close of every TOCTOU window: `dependencies.startSidecars`
-    // itself runs further async steps after this (directory creation,
-    // sidecar prewarming, the daemon becoming ready before the web
-    // sidecar even starts, and any later restart of either) during which
-    // nothing re-verifies anything. Fully eliminating that would need
-    // opening these paths once and executing from the resulting file
-    // descriptors rather than by path again later — out of scope for this
-    // change; documented here as a known, accepted residual gap rather
-    // than silently pretending this closes it completely.
+    // M1 (TOCTOU). Codex re-review round 2 (2026-10-06) correctly flagged
+    // two gaps in the previous version: it only re-checked the endpoints
+    // (verifiedTargets), skipping every INTERMEDIATE ancestor/subtree
+    // directory the Map below also recorded; and it only compared
+    // (dev, ino), which stays unchanged if an attacker chmod/chown's the
+    // SAME inode in place rather than swapping it for a different one.
+    // Fixed: re-lstat and re-verify EVERY path this whole check looked
+    // at — the full ancestor chain and subtree, not just the endpoints —
+    // and reject on ANY difference from what was recorded (dev, ino, uid,
+    // or mode), not just a changed inode. Still not a complete close of
+    // every TOCTOU window: `dependencies.startSidecars` itself runs
+    // further async steps after this (directory creation, sidecar
+    // prewarming, the daemon becoming ready before the web sidecar even
+    // starts, and any later restart of either) during which nothing
+    // re-verifies anything, and this function's own sequential awaits
+    // over many paths are themselves not atomic. Fully eliminating that
+    // would need opening these paths once and executing from the
+    // resulting file descriptors rather than by path again later — out
+    // of scope for this change; documented here as a known, accepted
+    // residual gap rather than silently pretending this closes it
+    // completely.
     async verify() {
-      for (const target of verifiedTargets) {
-        const expected = snapshots.get(target);
-        if (expected == null) continue;
+      for (const [target, expected] of snapshots) {
         const current = await deps.lstat(target);
-        if (current.dev !== expected.dev || current.ino !== expected.ino) {
+        if (
+          current.dev !== expected.dev
+          || current.ino !== expected.ino
+          || current.uid !== expected.uid
+          || current.mode !== expected.mode
+        ) {
           throw new Error(`agent24-headless config path changed after it was verified (possible TOCTOU swap): ${target}`);
         }
       }
