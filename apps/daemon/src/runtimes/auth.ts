@@ -386,7 +386,7 @@ const SEVERITY_LABELS = new Set([
  * Exported for that guard only.
  */
 export const OWN_AGENT_COMMAND_NAMES: ReadonlySet<string> = new Set([
-  'agy', 'aider', 'amp', 'amr', 'antigravity', 'atomcode', 'byok-opencode',
+  'agent24', 'agy', 'aider', 'amp', 'amr', 'antigravity', 'atomcode', 'byok-opencode',
   'claude', 'codebuddy', 'codex', 'copilot', 'cursor-agent', 'deepseek',
   'deepseek-harness', 'devin', 'dsh', 'grok', 'grok-build', 'hermes', 'kilo',
   'kimi', 'kiro', 'kiro-cli', 'mimo', 'opencode', 'opencode-cli', 'pi',

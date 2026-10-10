@@ -25,6 +25,7 @@ import { codebuddyAgentDef } from './defs/codebuddy.js';
 import { reasonixAgentDef } from './defs/reasonix.js';
 import { mimoAgentDef } from './defs/mimo.js';
 import { atomcodeAgentDef } from './defs/atomcode.js';
+import { agent24AgentDef } from './defs/agent24.js';
 import { readLocalAgentProfileDefs as readLocalAgentProfileDefsFromFile } from './local-profiles.js';
 import type { RuntimeAgentDef } from './types.js';
 
@@ -38,6 +39,7 @@ import type { RuntimeAgentDef } from './types.js';
  * `createLocalAgentDef`), so it is always an id we have never heard of.
  */
 export const SHIPPED_AGENT_DEFS: RuntimeAgentDef[] = [
+  agent24AgentDef,
   amrAgentDef,
   claudeAgentDef,
   codexAgentDef,

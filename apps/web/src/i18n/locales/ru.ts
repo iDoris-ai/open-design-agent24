@@ -320,7 +320,7 @@ export const ru: Dict = {
   'plugins.actions.openSource': 'Открыть исходники',
   'plugins.actions.openHomepage': 'Открыть домашнюю страницу',
   'plugins.actions.openMarketplace': 'Открыть в маркетплейсе',
-  'app.brand': 'OpenDesign',
+  'app.brand': 'iDoris Design',
   'app.brandPill': 'Предварительная исследовательская версия',
   'app.brandSubtitle': 'от Nexu Labs',
   'app.welcomeLoading': 'Загрузка рабочего пространства…',

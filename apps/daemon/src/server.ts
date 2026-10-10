@@ -1222,12 +1222,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = resolveProjectRoot(__dirname);
 const RESOURCE_ROOT_ENV = 'OD_RESOURCE_ROOT';
+const PACKAGED_RESOURCE_SAFE_BASE_ENV = 'OD_PACKAGED_RESOURCE_SAFE_BASE';
+const packagedResourceSafeBase = process.env[PACKAGED_RESOURCE_SAFE_BASE_ENV]?.trim();
 
 const DAEMON_RESOURCE_ROOT = resolveDaemonResourceRoot({
   safeBases: [
     PROJECT_ROOT,
     resolveProcessResourcesPath(),
-    process.env.OD_INSTALLATION_DIR,
+    // Agent24 headless supplies a resource-only packaged base because its
+    // installation root is writable state used for installation.json.
+    // Preserve the historical installation-root fallback for existing Open
+    // Design launcher payloads, but never grant it resource authority when
+    // the host supplies the narrower packaged base.
+    packagedResourceSafeBase || process.env.OD_INSTALLATION_DIR,
   ],
 });
 // Built web app lives in `out/` — that's where Next.js writes the static
@@ -16391,6 +16398,43 @@ export async function startServer({
             send('error', createSseErrorPayload(
               'AGENT_EXECUTION_FAILED',
               failureMessage,
+            ));
+            return finishWithRetryDecision('failed', 1, null);
+          }
+        }
+      }
+      if (
+        status === 'succeeded' &&
+        def.persistVisibleTextArtifacts === true &&
+        run.projectId
+      ) {
+        const textArtifacts = extractPlainStreamArtifacts(visibleAssistantText);
+        if (textArtifacts.length > 0) {
+          try {
+            const project = getProject(db, run.projectId);
+            const persistedTextArtifacts = await persistPlainStreamArtifactList({
+              projectsRoot: PROJECTS_DIR,
+              projectId: run.projectId,
+              artifacts: textArtifacts,
+              metadata: project?.metadata,
+              writeProjectFile,
+              overwriteMatchingIdentifier: true,
+            });
+            for (const artifact of persistedTextArtifacts) {
+              send('agent', {
+                type: 'artifact',
+                source: 'visible-text',
+                name: artifact.name,
+                path: artifact.name,
+                identifier: artifact.identifier,
+                artifactType: artifact.artifactType,
+              });
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            send('error', createSseErrorPayload(
+              'AGENT_EXECUTION_FAILED',
+              `Failed to persist visible-text artifact(s): ${message}`,
             ));
             return finishWithRetryDecision('failed', 1, null);
           }

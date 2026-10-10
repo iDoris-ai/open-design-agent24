@@ -30,7 +30,12 @@ import {
   toolPackSidecarStamp,
 } from "./config/sidecar-stamps.js";
 import { domToPptxBundleResource } from "./dom-to-pptx-resource.js";
-import { copyBundledResourceTrees, linuxResources, packBundledDshRuntime } from "./resources/index.js";
+import {
+  copyAgent24HeadlessLauncher,
+  copyBundledResourceTrees,
+  linuxResources,
+  packBundledDshRuntime,
+} from "./resources/index.js";
 import { copyOptionalVelaCliBinary } from "./vela-cli.js";
 import { electronBuilderVersionForAppVersion, readRuntimeAppVersion } from "./versioning/index.js";
 import { runWorkspaceBuild } from "./workspace-build.js";
@@ -548,6 +553,10 @@ async function writeAssembledApp(
   await writeFile(paths.assembledPackageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
 
   await writeFile(paths.assembledMainEntryPath, renderLinuxPackagedMainEntry(), "utf8");
+  await copyAgent24HeadlessLauncher({
+    workspaceRoot: config.workspaceRoot,
+    prebundledRoot: join(paths.assembledAppRoot, "prebundled"),
+  });
 
   await writeFile(
     paths.packagedConfigPath,

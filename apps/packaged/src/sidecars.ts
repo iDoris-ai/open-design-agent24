@@ -121,6 +121,7 @@ type ManagedSidecarChild = {
 type PackagedDaemonManagedPathEnv = {
   OD_DATA_DIR: string;
   OD_RESOURCE_ROOT: string;
+  OD_PACKAGED_RESOURCE_SAFE_BASE?: string;
   /**
    * Channel-root path. Lives one level above the namespaces directory so
    * the daemon can persist installationId (and any future fields that
@@ -609,11 +610,15 @@ export function resolvePackagedChildBaseEnv(
 
 function createPackagedDaemonManagedPathEnv(
   paths: PackagedNamespacePaths,
+  resourceSafeBase?: string | null,
 ): PackagedDaemonManagedPathEnv {
   return {
     OD_DATA_DIR: paths.dataRoot,
     OD_RESOURCE_ROOT: paths.resourceRoot,
     OD_INSTALLATION_DIR: paths.installationRoot,
+    ...(resourceSafeBase == null || resourceSafeBase.length === 0
+      ? {}
+      : { OD_PACKAGED_RESOURCE_SAFE_BASE: resourceSafeBase }),
   };
 }
 
@@ -639,6 +644,8 @@ export type PackagedDaemonSpawnEnvOptions = {
   telemetryRelayUrl?: string | null;
   posthogKey?: string | null;
   posthogHost?: string | null;
+  /** Trusted read-only base used only to validate OD_RESOURCE_ROOT. */
+  resourceSafeBase?: string | null;
   /**
    * Vela web console origin baked into the bundle at packaging time. Half of
    * the workspace-team gate — see {@link workspaceTeamTransportEnv}.
@@ -672,7 +679,7 @@ export function buildPackagedDaemonSpawnEnv(
     // the sidecar launch environment. The daemon may keep its own default
     // fallback, but packaged runtime must not rely on path inference from
     // Electron userData, bundle names, or ports.
-    ...createPackagedDaemonManagedPathEnv(paths),
+    ...createPackagedDaemonManagedPathEnv(paths, options.resourceSafeBase),
     ...(options.nodeCommand == null || options.nodeCommand.length === 0
       ? {}
       : { OD_NODE_BIN: options.nodeCommand }),
@@ -866,6 +873,7 @@ export async function startPackagedSidecars(
     telemetryRelayUrl: string | null;
     posthogKey: string | null;
     posthogHost: string | null;
+    resourceSafeBase?: string | null;
     velaWebUrl: string | null;
     velaWebUrls?: Record<string, string>;
     /**
@@ -951,6 +959,7 @@ export async function startPackagedSidecars(
         telemetryRelayUrl: options.telemetryRelayUrl,
         posthogKey: options.posthogKey,
         posthogHost: options.posthogHost,
+        resourceSafeBase: options.resourceSafeBase,
         velaWebUrl: options.velaWebUrl,
         velaWebUrls: options.velaWebUrls,
       }),

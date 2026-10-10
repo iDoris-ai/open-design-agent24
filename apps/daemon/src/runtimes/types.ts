@@ -161,6 +161,12 @@ export type RuntimeAgentDef = {
     runtimeContext?: RuntimeContext,
   ) => string[];
   streamFormat: string;
+  // Prototype/compatibility opt-in for structured runtimes whose canonical
+  // deliverable is a final visible <artifact> block rather than a filesystem
+  // tool write. The daemon reuses the existing plain-stream artifact parser
+  // and persistence path over the bounded visible assistant text. Undefined
+  // keeps every existing structured runtime unchanged.
+  persistVisibleTextArtifacts?: boolean;
   fallbackBins?: string[];
   versionProbeTimeoutMs?: number;
   versionPolicy?: RuntimeVersionPolicy;

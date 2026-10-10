@@ -13,6 +13,10 @@
     "./headless": {
       "default": "./dist/headless.mjs"
     },
+    "./agent24-headless": {
+      "types": "./dist/agent24-headless.d.ts",
+      "default": "./dist/agent24-headless.mjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [
