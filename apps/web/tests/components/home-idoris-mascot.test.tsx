@@ -49,12 +49,17 @@ describe('iDoris home mascot', () => {
     render(<HomeHero {...heroProps()} />);
 
     const mascot = screen.getByTestId('idoris-mascot');
-    expect(mascot.tagName).toBe('IMG');
-    expect(mascot.getAttribute('src')).toBe('/idoris-mascot/idle.svg');
+    expect(mascot.tagName).toBe('SPAN');
     expect(mascot.getAttribute('data-state')).toBe('idle');
-    expect(mascot.getAttribute('width')).toBe('72');
-    expect(mascot.className).toContain('home-hero__idoris-mascot--breathe');
+    expect(mascot.className).toContain('home-hero__idoris-mascot--alive');
     expect(mascot.className).toContain('home-hero__idoris-mascot');
+    const base = mascot.querySelector('.home-hero__idoris-mascot-frame--base');
+    expect(base?.tagName).toBe('IMG');
+    expect(base?.getAttribute('src')).toBe('/idoris-mascot/idle.svg');
+    expect(base?.getAttribute('width')).toBe('72');
+    expect(mascot.querySelector('.home-hero__idoris-mascot-frame--blink')?.getAttribute('src')).toBe(
+      '/idoris-mascot/blink.svg',
+    );
 
     const title = screen.getByRole('heading', { level: 1 });
     expect(title.className).toContain('home-hero__title--with-mascot');
@@ -103,20 +108,34 @@ describe('iDoris home mascot', () => {
       render(<IDorisMascot state={state} />);
       const mascot = screen.getByTestId('idoris-mascot');
       expect(mascot.getAttribute('data-state')).toBe(state);
-      expect(mascot.getAttribute('src')).toBe(`/idoris-mascot/${state}.svg`);
-      expect(mascot.classList.contains('home-hero__idoris-mascot--breathe')).toBe(state === 'idle');
+      expect(mascot.querySelector('.home-hero__idoris-mascot-frame--base')?.getAttribute('src')).toBe(
+        `/idoris-mascot/${state}.svg`,
+      );
+      expect(mascot.classList.contains('home-hero__idoris-mascot--alive')).toBe(state === 'idle');
+      expect(mascot.querySelector('.home-hero__idoris-mascot-frame--blink')?.getAttribute('src') ?? null).toBe(
+        state === 'idle' ? '/idoris-mascot/blink.svg' : null,
+      );
     }
   });
 
-  it('stops the idle breathe under prefers-reduced-motion: reduce', () => {
-    expect(homeHeroCss).toMatch(
-      /@media \(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.home-hero__idoris-mascot\s*\{[^}]*animation:\s*none[^}]*transform:\s*none/,
-    );
+  it('stops float, sway, blink, and hover under prefers-reduced-motion: reduce', () => {
+    const reduced = homeHeroCss.slice(homeHeroCss.indexOf('@media (prefers-reduced-motion: reduce)'));
+    const block = reduced.slice(0, reduced.indexOf('}') + reduced.slice(reduced.indexOf('}') + 1).indexOf('}') + 2);
+    expect(block).toContain('.home-hero__idoris-mascot--alive .home-hero__idoris-mascot-float');
+    expect(block).toContain('.home-hero__idoris-mascot--alive:hover .home-hero__idoris-mascot-hop');
+    expect(block).toContain('.home-hero__idoris-mascot--alive .home-hero__idoris-mascot-frame--blink');
+    expect(block).toContain('animation: none');
+    expect(block).toContain('transform: none');
+    expect(block).toContain('opacity: 0');
     expect(homeHeroCss).toContain('image-rendering: pixelated');
+    expect(homeHeroCss).toContain('translateY(-5px)');
+    expect(homeHeroCss).toContain('rotate(2deg)');
+    expect(homeHeroCss).toContain('translateY(-6px)');
+    expect(homeHeroCss).toContain('idoris-mascot-blink 4s');
 
     setAgent24Shell(true);
     render(<HomeHero {...heroProps()} />);
     const mascot = screen.getByTestId('idoris-mascot');
-    expect(mascot.classList.contains('home-hero__idoris-mascot--breathe')).toBe(true);
+    expect(mascot.classList.contains('home-hero__idoris-mascot--alive')).toBe(true);
   });
 });

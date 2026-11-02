@@ -193,30 +193,90 @@
    light ground stays as clean as preview-light.png. */
 .home-hero__idoris-mascot {
   flex: none;
+  position: relative;
+  display: inline-block;
   width: 72px;
-  height: auto;
-  aspect-ratio: 48 / 66;
+  height: 99px;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.home-hero__idoris-mascot-hop,
+.home-hero__idoris-mascot-float {
+  display: block;
+  width: 72px;
+  height: 99px;
+}
+.home-hero__idoris-mascot-frame {
+  display: block;
+  width: 72px;
+  height: 99px;
   image-rendering: crisp-edges;
   image-rendering: pixelated;
   user-select: none;
   -webkit-user-drag: none;
 }
-.home-hero__idoris-mascot--breathe {
-  animation: idoris-mascot-breathe 3.2s ease-in-out infinite;
+/* Blink sits on the idle frame. Opacity swaps the whole cell grid, so the
+   closed eye is the only thing that changes and the scale stays pixelated. */
+.home-hero__idoris-mascot-frame--blink {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
 }
-@keyframes idoris-mascot-breathe {
+/* Idle only. 5px is a whole pixel step at the 72px display size. The 2deg
+   sway is the one non-axis transform; translation stays on whole pixels. */
+.home-hero__idoris-mascot--alive .home-hero__idoris-mascot-float {
+  transform-origin: 50% 100%;
+  animation: idoris-mascot-float 2.8s ease-in-out infinite;
+}
+@keyframes idoris-mascot-float {
   0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(2deg);
+  }
+}
+/* One blink per 4s. The lid is down for the last 3.5% (140ms) and the
+   keyframe step is a single percent so the eye snaps instead of fading. */
+.home-hero__idoris-mascot--alive .home-hero__idoris-mascot-frame--blink {
+  animation: idoris-mascot-blink 4s linear infinite;
+}
+@keyframes idoris-mascot-blink {
+  0%,
+  96.5% {
+    opacity: 0;
+  }
+  96.6%,
+  100% {
+    opacity: 1;
+  }
+}
+.home-hero__idoris-mascot--alive:hover .home-hero__idoris-mascot-hop {
+  animation: idoris-mascot-hop 0.42s ease-out;
+}
+@keyframes idoris-mascot-hop {
+  0% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-6px);
+  }
   100% {
     transform: translateY(0);
   }
-  50% {
-    transform: translateY(-2px);
-  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .home-hero__idoris-mascot {
+  .home-hero__idoris-mascot--alive .home-hero__idoris-mascot-float,
+  .home-hero__idoris-mascot--alive:hover .home-hero__idoris-mascot-hop,
+  .home-hero__idoris-mascot--alive .home-hero__idoris-mascot-frame--blink {
     animation: none;
     transform: none;
+  }
+  .home-hero__idoris-mascot--alive .home-hero__idoris-mascot-frame--blink {
+    opacity: 0;
   }
 }
 /* Quiet second line under the headline: same 14px grey the rest of the page's

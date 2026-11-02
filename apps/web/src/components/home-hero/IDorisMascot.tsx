@@ -21,21 +21,39 @@ const MASCOT_SRC: Record<IDorisMascotState, string> = {
 export const IDORIS_MASCOT_WIDTH_PX = 72;
 export const IDORIS_MASCOT_HEIGHT_PX = 99;
 
+const BLINK_SRC = '/idoris-mascot/blink.svg';
+
 export function IDorisMascot({ state = 'idle' }: { state?: IDorisMascotState }) {
+  const alive = state === 'idle';
   return (
-    <img
-      className={
-        'home-hero__idoris-mascot' +
-        (state === 'idle' ? ' home-hero__idoris-mascot--breathe' : '')
-      }
-      src={MASCOT_SRC[state]}
-      alt=""
-      width={IDORIS_MASCOT_WIDTH_PX}
-      height={IDORIS_MASCOT_HEIGHT_PX}
-      draggable={false}
+    <span
+      className={'home-hero__idoris-mascot' + (alive ? ' home-hero__idoris-mascot--alive' : '')}
       data-state={state}
       data-testid="idoris-mascot"
       aria-hidden="true"
-    />
+    >
+      <span className="home-hero__idoris-mascot-hop">
+        <span className="home-hero__idoris-mascot-float">
+          <img
+            className="home-hero__idoris-mascot-frame home-hero__idoris-mascot-frame--base"
+            src={MASCOT_SRC[state]}
+            alt=""
+            width={IDORIS_MASCOT_WIDTH_PX}
+            height={IDORIS_MASCOT_HEIGHT_PX}
+            draggable={false}
+          />
+          {alive ? (
+            <img
+              className="home-hero__idoris-mascot-frame home-hero__idoris-mascot-frame--blink"
+              src={BLINK_SRC}
+              alt=""
+              width={IDORIS_MASCOT_WIDTH_PX}
+              height={IDORIS_MASCOT_HEIGHT_PX}
+              draggable={false}
+            />
+          ) : null}
+        </span>
+      </span>
+    </span>
   );
 }
