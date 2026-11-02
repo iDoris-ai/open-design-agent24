@@ -66,6 +66,7 @@ import { SignOutConfirmDialog } from './SignOutConfirmDialog';
 import { notifyAmrLoginStatusChanged } from './amrLoginPolling';
 import { Icon } from './Icon';
 import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useGithubStars';
+import { isAgent24Shell } from '../runtime/agent24-shell';
 import { PlanWordmark, planBadgeTierForWorkspace } from './PlanWordmark';
 import { MarqueeLabel } from './MarqueeLabel';
 import { RemixIcon } from './RemixIcon';
@@ -1096,6 +1097,9 @@ export function EntryTopRightCluster({
   const [chromeActionsHost, setChromeActionsHost] = useState<HTMLElement | null>(
     workspaceChromeAccountActionsHost,
   );
+  // Agent24 headless stamps namespace `agent24-creative` and the web sidecar
+  // sets this flag before the client app mounts. Upstream leaves it unset.
+  const agent24Shell = isAgent24Shell();
 
   // On the initial App render the tabs chrome and this cluster are committed
   // in the same pass, so the host does not exist while this component renders.
@@ -1225,7 +1229,7 @@ export function EntryTopRightCluster({
   // Sign-out confirm gate (recvqgMWpJZqhL): the menu item only ARMS the
   // confirmation dialog; the real logout chain runs on explicit confirm.
   const [confirmSignOut, setConfirmSignOut] = useState(false);
-  const githubStars = useGithubStars();
+  const githubStars = useGithubStars({ enabled: !agent24Shell });
   // Signed-in account email for the menu head (#5517 shows it under the
   // display name). The workspace context carries no email, so lazily read the
   // vela login-status projection the first time the menu opens — never on
@@ -1442,7 +1446,7 @@ export function EntryTopRightCluster({
           {/* GitHub star chip: its own option in the cluster, right after the
               campaign badge (per product) — it used to live in the account
               menu's social row. */}
-          {clusterVisible ? (
+          {clusterVisible && !agent24Shell ? (
             <a
               className="entry-top-right-github"
               href={REPO_URL}
@@ -1465,7 +1469,7 @@ export function EntryTopRightCluster({
               anchor around it owns the hover region for the billing panel
               below: the panel is a DOM child, so crossing from the pill into
               it never leaves the anchor and never arms the close. */}
-          {context && showCreditsPill ? (
+          {context && showCreditsPill && !agent24Shell ? (
             <div
               ref={creditsAnchorRef}
               className="entry-top-right-credits-anchor"

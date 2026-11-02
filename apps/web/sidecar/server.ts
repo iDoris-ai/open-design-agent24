@@ -26,6 +26,12 @@ import {
   type WebStatusSnapshot,
 } from "@open-design/sidecar-proto";
 
+import {
+  isAgent24DocumentRequest,
+  isAgent24HeadlessNamespace,
+  rewriteAgent24ShellDocument,
+} from "./agent24-shell.js";
+
 const HOST = process.env.OD_HOST || "127.0.0.1";
 if (process.env.OD_HOST != null && !/^[a-zA-Z0-9._\-:[\]@]+$/.test(process.env.OD_HOST)) {
   throw new Error(`OD_HOST contains invalid characters: ${process.env.OD_HOST}`);
@@ -523,15 +529,24 @@ function shouldReplayProxyRequest(input: {
   return code === "ECONNRESET" || code === "EPIPE";
 }
 
-async function proxyHttpRequest(
+export async function proxyHttpRequest(
   target: URL,
   request: IncomingMessage,
   response: ServerResponse,
-  options: { daemonWebPort?: number } = {},
+  options: { agent24Shell?: boolean; daemonWebPort?: number } = {},
 ): Promise<void> {
   const secure = target.protocol === "https:";
   const proxyRequestFactory = secure ? createHttpsRequest : createHttpRequest;
   const headers = { ...request.headers, host: target.host };
+  // Document HTML is rewritten in place. Ask the upstream for identity so the
+  // bytes we inject into are not gzip. Asset and daemon responses keep the
+  // caller's Accept-Encoding.
+  const rewriteDocument = options.agent24Shell === true && isAgent24DocumentRequest({
+    method: request.method,
+    accept: request.headers.accept,
+    pathname: resolveRequestPathname(request.url) ?? "",
+  });
+  if (rewriteDocument) delete headers["accept-encoding"];
   if (options.daemonWebPort != null) {
     const origin = normalizeDaemonProxyOriginHeader({
       daemonOrigin: target.origin,
@@ -560,9 +575,46 @@ async function proxyHttpRequest(
           agent: attempt === 0 ? (secure ? proxyHttpsAgent : proxyHttpAgent) : false,
         },
         (proxyResponse) => {
-          response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
-          proxyResponse.pipe(response);
-          proxyResponse.on("end", resolveProxy);
+          if (!rewriteDocument) {
+            response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
+            proxyResponse.pipe(response);
+            proxyResponse.on("end", resolveProxy);
+            return;
+          }
+          const chunks: Buffer[] = [];
+          let settled = false;
+          const finish = (send: () => void): void => {
+            if (settled) return;
+            settled = true;
+            send();
+            resolveProxy();
+          };
+          proxyResponse.on("data", (chunk: Buffer | string) => {
+            chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+          });
+          proxyResponse.on("end", () => {
+            finish(() => {
+              const raw = Buffer.concat(chunks);
+              const rewritten = rewriteAgent24ShellDocument(proxyResponse.headers, raw);
+              const status = proxyResponse.statusCode ?? 502;
+              if (rewritten == null) {
+                if (!response.headersSent) response.writeHead(status, proxyResponse.headers);
+                response.end(raw);
+                return;
+              }
+              if (!response.headersSent) response.writeHead(status, rewritten.headers);
+              response.end(rewritten.body);
+            });
+          });
+          proxyResponse.on("error", () => {
+            finish(() => {
+              if (!response.headersSent) {
+                response.statusCode = 502;
+                response.setHeader("content-type", "text/plain; charset=utf-8");
+              }
+              response.end("upstream document failed");
+            });
+          });
         },
       );
 
@@ -1093,6 +1145,12 @@ async function startStandaloneNextSidecar(
 ): Promise<WebSidecarHandle> {
   const daemonOrigin = resolveDaemonOrigin();
   const backend = await startStandaloneBackend(webRoot);
+  // Agent24 headless always takes this standalone path (`webOutputMode:
+  // "standalone"`) and stamps `namespace: agent24-creative`. The boot script
+  // lands in `<head>` before the ssr:false client app mounts.
+  const agent24Shell = isAgent24HeadlessNamespace(
+    typeof runtime.namespace === "string" ? runtime.namespace : null,
+  );
   const httpServer = createHttpServer(createDaemonProxyHandler(daemonOrigin, async (request, response) => {
     if (!backend.isRunning()) {
       response.statusCode = 502;
@@ -1105,7 +1163,7 @@ async function startStandaloneNextSidecar(
       response.end("invalid request URL");
       return;
     }
-    await proxyHttpRequest(target, request, response);
+    await proxyHttpRequest(target, request, response, { agent24Shell });
   }));
 
   try {

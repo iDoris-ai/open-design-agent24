@@ -97,8 +97,15 @@ export function formatStars(count: number): string {
 
 export const GITHUB_REPO_URL = REPO;
 
-export function useGithubStars(): number | null {
+export function resetGithubStarsCacheForTests(): void {
+  memoryCache = null;
+  memoryFailureAt = null;
+}
+
+export function useGithubStars(options?: { enabled?: boolean }): number | null {
+  const enabled = options?.enabled !== false;
   const [count, setCount] = useState<number | null>(() => {
+    if (!enabled) return null;
     if (memoryCache) return memoryCache.count;
     const persisted = readPersistedCache();
     if (persisted) memoryCache = persisted;
@@ -106,6 +113,7 @@ export function useGithubStars(): number | null {
   });
 
   useEffect(() => {
+    if (!enabled) return;
     const now = Date.now();
     const cached = memoryCache ?? readPersistedCache();
     if (cached && now - cached.ts < CACHE_TTL_MS) {
@@ -152,7 +160,7 @@ export function useGithubStars(): number | null {
       }
     })();
     return () => ctrl.abort();
-  }, []);
+  }, [enabled]);
 
   return count;
 }
