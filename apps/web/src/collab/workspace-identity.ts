@@ -1,12 +1,20 @@
 import type { WorkspaceCollabContext } from '@open-design/contracts';
 
+import { isLocalSingleUserContext } from '../identity/IdentityBridge';
+
 /**
  * The complete workspace identity carried by workspace-aware web requests.
  *
  * Keep this helper independent from React hooks and project state so shared
  * catalog modules can use it without creating an import cycle.
+ *
+ * The local single-user stub is not a Workspace and puts nothing on the wire.
+ * If it did, the daemon would bind new projects to a `local` workspace row and
+ * the unscoped `/api/projects` list (which is what the local stub reads) would
+ * stop showing them.
  */
 export function workspaceProjectHeaders(context: WorkspaceCollabContext): HeadersInit {
+  if (isLocalSingleUserContext(context)) return {};
   return {
     'x-od-workspace-id': context.workspaceId,
     'x-od-workspace-type': context.workspaceType,
@@ -28,7 +36,7 @@ export function workspaceResourceUrl(
   path: string,
   context: WorkspaceCollabContext | null | undefined,
 ): string {
-  if (!context) return path;
+  if (!context || isLocalSingleUserContext(context)) return path;
   const separator = path.includes('?') ? '&' : '?';
   return `${path}${separator}workspaceId=${encodeURIComponent(context.workspaceId)}`
     + `&workspaceMemberId=${encodeURIComponent(context.workspaceMemberId)}`;

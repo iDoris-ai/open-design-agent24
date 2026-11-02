@@ -26,7 +26,11 @@ import {
   readVelaLoginStatus,
   startVelaLogin,
 } from '../../src/providers/daemon';
-import { listProjects } from '../../src/state/projects';
+import { createProject, listProjects } from '../../src/state/projects';
+import {
+  workspaceProjectHeaders,
+  workspaceResourceUrl,
+} from '../../src/collab/workspace-identity';
 
 const CLOUD_HOST = /amr-api\.open-design\.ai|amr-link\.open-design\.ai|open-design\.ai\/(?:cloud|amr)(?:\/|$|\?)/;
 
@@ -73,6 +77,8 @@ describe('LocalSingleUser', () => {
       'ตอนนี้เป็นผู้ใช้ในเครื่องนี้ บัญชีคลาวด์ยังไม่ได้เชื่อมต่อ',
     );
     expect(localShareUnavailable('zh-CN')).toContain('分享暂时不可用');
+    expect(localAccountSentence('zh-TW')).toBe('目前是本機使用者，雲端帳戶未連接。');
+    expect(localShareUnavailable('zh-TW')).toContain('分享暫時無法使用');
     expect(localShareUnavailable('en')).toContain('Sharing is unavailable');
     expect(localShareUnavailable('th')).toContain('ยังแชร์ไม่ได้');
 
@@ -121,5 +127,50 @@ describe('LocalSingleUser', () => {
     expect(seen.some((url) => url.includes('/api/workspaces/local/projects'))).toBe(false);
     expect(seen.some((url) => url === '/api/projects' || url.endsWith('/api/projects'))).toBe(true);
     expect(seen.some((url) => url.includes('amr-api') || url.includes('/api/integrations/vela') || url.includes('/api/amr/'))).toBe(false);
+  });
+
+  it('sends no workspace identity for the local stub, so created projects stay in the unscoped list', async () => {
+    const local = localWorkspaceContext();
+    expect(workspaceProjectHeaders(local)).toEqual({});
+    expect(workspaceResourceUrl('/api/projects/p1/raw/index.html', local)).toBe(
+      '/api/projects/p1/raw/index.html',
+    );
+    // A real cloud workspace still carries its identity.
+    const team = { ...local, workspaceId: 'ws-team', workspaceType: 'team' as const };
+    expect(workspaceProjectHeaders(team)).toMatchObject({ 'x-od-workspace-id': 'ws-team' });
+    expect(workspaceResourceUrl('/x', team)).toContain('workspaceId=ws-team');
+
+    const requests: Array<{ url: string; headers: Record<string, string> }> = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers).forEach((value, key) => {
+        headers[key] = value;
+      });
+      requests.push({ url, headers });
+      if (init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({ project: { id: 'p-new', name: 'New' }, conversationId: 'c1' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ projects: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      await createProject({
+        name: 'New',
+        skillId: null,
+        designSystemId: null,
+        workspaceContext: local,
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+    const create = requests.find((request) => request.url.endsWith('/api/projects'));
+    expect(create).toBeDefined();
+    expect(Object.keys(create!.headers).filter((key) => key.startsWith('x-od-workspace'))).toEqual([]);
   });
 });
