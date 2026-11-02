@@ -5,6 +5,10 @@ import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCol
 import { FileViewer } from '../../src/components/FileViewer';
 import { invalidateHtmlSourceSnapshotProject } from '../../src/components/html-source-snapshot-cache';
 import { CollabProvider, type CollabContextValue } from '../../src/collab/collab-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 const source = '<html><body><h2>Authored target</h2></body></html>';
 const context: WorkspaceCollabContext = {
   workspaceId: 'ws', workspaceType: 'team', workspaceMemberId: 'owner', role: 'owner',

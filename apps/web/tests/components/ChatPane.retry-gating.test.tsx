@@ -186,3 +186,37 @@ describe('2026-09-14 有效重试接管旧错误卡', () => {
     expect(screen.queryByTestId('chat-run-error-card')).toBeNull();
   });
 });
+
+describe('ODX-3 cloud account required', () => {
+  it('names the missing cloud account and offers no Retry or Cloud switch', () => {
+    const refused = {
+      ...failedMessage,
+      events: [
+        {
+          kind: 'status',
+          label: 'error',
+          detail: 'The Open Design cloud agent (AMR) is not available',
+          code: 'CLOUD_ACCOUNT_REQUIRED',
+        },
+      ],
+    } as ChatMessage;
+    renderChat({ messages: [userMessage, refused] });
+
+    const card = screen.getByTestId('chat-run-error-card');
+    expect(card.textContent).toContain('chat.runError.title.cloudAccountRequired');
+    expect(screen.getByTestId('chat-run-error-description').textContent).toContain(
+      'chat.runError.cloudAccountRequiredMessage',
+    );
+    expect(screen.queryByTestId('chat-error-retry')).toBeNull();
+    expect(screen.queryByTestId('chat-error-switch-to-cloud')).toBeNull();
+  });
+
+  it('does not offer the Cloud switch on a local-agent failure while the account is disabled', () => {
+    renderChat({
+      messages: [userMessage, { ...failedMessage, agentId: 'claude' } as ChatMessage],
+      config: { agentId: 'claude', agentCliEnv: {} } as unknown as AppConfig,
+    });
+    expect(screen.getByTestId('chat-run-error-card')).toBeTruthy();
+    expect(screen.queryByTestId('chat-error-switch-to-cloud')).toBeNull();
+  });
+});

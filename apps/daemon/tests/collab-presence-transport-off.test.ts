@@ -3,6 +3,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EnabledCloudAccount } from '../src/identity/cloud-account.js';
 import {
   buildWorkspacePermissions,
   buildWorkspaceSeatSummary,
@@ -33,6 +34,7 @@ type ServerModule = {
   startServer: (options: {
     port: number;
     returnServer: boolean;
+    cloudAccount?: { readonly kind: 'enabled' };
   }) => Promise<StartedServer>;
 };
 
@@ -335,7 +337,7 @@ async function startIsolatedServer(): Promise<{
     vi.resetModules();
     serverModule = (await import('../src/server.js')) as unknown as ServerModule;
   }
-  started = await serverModule.startServer({ port: 0, returnServer: true });
+  started = await serverModule.startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount});
   const base = started.url;
   const read = async (response: Response) => ({
     status: response.status,

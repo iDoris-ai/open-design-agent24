@@ -6,6 +6,18 @@ import { evidenceStore, enqueueFeedbackEvidence, drainEvidence } from '../src/se
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildFeedbackPayload, readFeedbackTelemetrySinkConfig, type FeedbackReportContext } from '../src/langfuse-trace.js';
 import { reportRunFeedbackFromDaemon } from '../src/langfuse-bridge.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../src/identity/cloud-account.js';
+
+// These cases exercise the Vela telemetry sink, which DisabledCloudAccount never selects (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const config = vi.hoisted(() => ({
   installationId: 'synthetic-installation',

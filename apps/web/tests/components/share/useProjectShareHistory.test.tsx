@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProjectShareHistory } from '../../../src/components/share/useProjectShareHistory';
 import { AMR_LOGIN_STATUS_EVENT } from '../../../src/components/amrLoginPolling';
 import { advanceWorkspaceAccountGeneration, resetWorkspaceAccountGeneration } from '../../../src/collab/workspace-identity';
+import { useEnabledCloudAccount } from '../../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 const neverShared = { projectId: 'p', bindingExists: false, hasEverShared: false, publications: [] };
 const stopped = { ...neverShared, bindingExists: true, hasEverShared: true, publications: [{ sourceFilePath: 'page.html', slug: 'stable', status: 'stopped' }] };
 const request = vi.fn<typeof fetch>();

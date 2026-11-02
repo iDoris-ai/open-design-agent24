@@ -24,6 +24,10 @@ import {
   workspaceContextFixture,
   workspaceDirectoryFixture,
 } from './helpers/workspace-context';
+import { useEnabledCloudAccount } from './helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const SIGNED_IN = workspaceContextFixture({
   workspaceId: 'ws-1',

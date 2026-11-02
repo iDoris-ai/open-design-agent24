@@ -370,7 +370,7 @@ describe('server.ts wiring (source boundary)', () => {
       'await recoverAuthorizedTeamProjectPromotions({',
     );
     const routes = source.indexOf(
-      'const collabSyncRoutes = registerCollabSyncRoutes(app, {',
+      'const collabSyncRoutes = cloudAccountEnabled ? registerCollabSyncRoutes(app, {',
     );
     expect(recovery).toBeGreaterThan(-1);
     expect(routes).toBeGreaterThan(recovery);

@@ -22,6 +22,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EntryNavRail, resetWorkspaceDirectoryCache } from '../../src/components/EntryNavRail';
 import { CloudSignInTip } from '../../src/components/CloudSignInTip';
 import { I18nProvider } from '../../src/i18n';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const DISMISSED_KEY = 'od.entry.cloudSignInTip.dismissed';
 const originalFetch = globalThis.fetch;

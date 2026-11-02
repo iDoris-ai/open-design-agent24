@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EnabledCloudAccount } from '../src/identity/cloud-account.js';
 
 type StartedServer = {
   url: string;
@@ -89,9 +90,13 @@ describe('server workspace context authority wiring', () => {
 
     vi.resetModules();
     const serverModule = (await import('../src/server.js')) as unknown as {
-      startServer(options: { port: number; returnServer: true }): Promise<StartedServer>;
+      startServer(options: {
+        port: number;
+        returnServer: true;
+        cloudAccount?: { readonly kind: 'enabled' };
+      }): Promise<StartedServer>;
     };
-    daemon = await serverModule.startServer({ port: 0, returnServer: true });
+    daemon = await serverModule.startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount});
 
     const initial = await getWorkspaceContext();
     expect(initial).toMatchObject({ workspaceType: 'team', role: 'admin' });

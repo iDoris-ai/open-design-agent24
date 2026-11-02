@@ -37,6 +37,18 @@ import {
   parseVelaModels,
 } from '../src/runtimes/defs/amr.js';
 import { getAgentDef } from '../src/runtimes/registry.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../src/identity/cloud-account.js';
+
+// These cases run the AMR cloud agent, which DisabledCloudAccount refuses at run start (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FAKE_VELA = path.join(HERE, 'fixtures', 'fake-vela.mjs');

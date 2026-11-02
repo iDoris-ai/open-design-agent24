@@ -27,6 +27,18 @@ import { readTaskTelemetrySinkConfig } from '../../src/langfuse-trace.js';
 import { buildStructuredMainRunObservationV1 } from '../../src/observability/main-run-observation.js';
 import { createEmptyFrozenSkillPackage } from '../../src/strategies/od-next/frozen-skill-package.js';
 import type { StrategyTaskExecutionRecord } from '../../src/strategies/task-store.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/cloud-account.js';
+
+// These cases exercise the Vela telemetry sink, which DisabledCloudAccount never selects (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const RUN_ID = 'run-production';
 const TASK_ID = 'task-otlp-fixture';

@@ -7,6 +7,7 @@
 // result changes behavior must preserve failure as a typed error instead.
 
 import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
+import { isLocalSingleUserContext } from '../identity/IdentityBridge';
 import { isDaemonProxyConnectionFailure } from '../runtime/daemon-proxy-failure';
 import { BackoffController, type BackoffOptions } from '../lib/backoff';
 import { markProjectCreatedByViewer } from '../collab/useProjectCollab';
@@ -271,13 +272,34 @@ function omitWorkspaceContext<T extends { workspaceContext?: WorkspaceCollabCont
   return rest;
 }
 
+/**
+ * Does a just-created (pending) project belong to the list scope `context`?
+ *
+ * The local single-user stub is not a Workspace: its projects are unbound
+ * (`workspaceId` absent), exactly as with no context at all. An older build
+ * may have stamped the stub id `local` on an optimistic row; accept that too.
+ */
+export function pendingProjectBelongsToWorkspace(
+  project: Pick<Project, 'workspaceId'>,
+  context: WorkspaceCollabContext | null,
+): boolean {
+  if (context === null) return project.workspaceId == null;
+  if (isLocalSingleUserContext(context)) {
+    return project.workspaceId == null || project.workspaceId === context.workspaceId;
+  }
+  return project.workspaceId === context.workspaceId;
+}
+
 export async function listProjects(options?: {
   throwOnError?: boolean;
   workspaceContext?: WorkspaceCollabContext | null;
   workspaceView?: WorkspaceProjectListView;
 }): Promise<Project[]> {
   const context = options?.workspaceContext ?? null;
-  if (context) {
+  // The local single-user stub is not a cloud workspace. Listing it through
+  // `/api/workspaces/:id/projects` would ask the daemon to authorize an id
+  // that has no directory. Personal projects stay on `/api/projects`.
+  if (context && !isLocalSingleUserContext(context)) {
     const summaries = await listWorkspaceProjectSummaries({
       context,
       workspaceView: options?.workspaceView,

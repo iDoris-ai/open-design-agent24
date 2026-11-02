@@ -40,6 +40,10 @@ import type { AgentInfo, AppConfig } from '../../src/types';
 import { EntryShellWithGateHost } from '../helpers/entry-shell-gate-host';
 import { setHomeHeroPrompt } from '../helpers/home-hero-lexical';
 import { workspaceDirectoryFixture } from '../helpers/workspace-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 vi.mock('../../src/runtime/amr-balance-gate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/runtime/amr-balance-gate')>();

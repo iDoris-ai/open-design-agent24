@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { register } from 'prom-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EnabledCloudAccount } from '../src/identity/cloud-account.js';
 
 type StartedServer = {
   url: string;
@@ -104,13 +105,17 @@ describe('server workspace billing runtime wiring', () => {
 
     vi.resetModules();
     const serverModule = (await import('../src/server.js')) as unknown as {
-      startServer(options: { port: number; returnServer: true }): Promise<StartedServer>;
+      startServer(options: {
+        port: number;
+        returnServer: true;
+        cloudAccount?: { readonly kind: 'enabled' };
+      }): Promise<StartedServer>;
     };
     // RUNTIME_DATA_DIR is resolved during module startup. Later Vela commands
     // must receive the selected settings explicitly instead of depending on
     // the launcher-only OD_DATA_DIR environment variable.
     delete process.env.OD_DATA_DIR;
-    daemon = await serverModule.startServer({ port: 0, returnServer: true });
+    daemon = await serverModule.startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount});
 
     const billingUrl =
       `${daemon.url}/api/workspace/billing?scope=workspace&workspaceId=${PERSONAL.workspaceId}`;
@@ -180,12 +185,16 @@ describe('server workspace billing runtime wiring', () => {
 
     vi.resetModules();
     const serverModule = (await import('../src/server.js')) as unknown as {
-      startServer(options: { port: number; returnServer: true }): Promise<StartedServer>;
+      startServer(options: {
+        port: number;
+        returnServer: true;
+        cloudAccount?: { readonly kind: 'enabled' };
+      }): Promise<StartedServer>;
     };
     const metrics = await import('../src/metrics/workspace-authority.js');
     metrics.__resetWorkspaceAuthorityMetricsForTests();
     delete process.env.OD_DATA_DIR;
-    daemon = await serverModule.startServer({ port: 0, returnServer: true });
+    daemon = await serverModule.startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount});
 
     const billingUrl =
       `${daemon.url}/api/workspace/billing?scope=workspace&workspaceId=${PERSONAL.workspaceId}`;

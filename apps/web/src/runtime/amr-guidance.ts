@@ -305,6 +305,7 @@ export type RunFailureMessageKey =
   | 'chat.runError.signInMessage.amr'
   | 'chat.runError.signInMessage.other'
   | 'chat.runError.cliMissingMessage'
+  | 'chat.runError.cloudAccountRequiredMessage'
   | 'chat.runError.promptTooLargeMessage'
   | 'chat.runError.modelUnavailableMessage'
   | 'chat.runError.modelCapabilityUnsupportedMessage'
@@ -487,6 +488,7 @@ export type RunFailureTitleKey =
   | 'chat.runError.title.membershipConcurrencyLimit'
   | 'chat.amrBalanceGate.title'
   | 'chat.runError.title.cliMissing'
+  | 'chat.runError.title.cloudAccountRequired'
   | 'chat.runError.title.promptTooLarge'
   | 'chat.runError.title.modelUnavailable'
   // S13 · 「模型能力不支持」—— 和上面那格**不是**同一句话。文档 S13 表里
@@ -1028,6 +1030,16 @@ const AGENT_AGNOSTIC_FAILURE_UI: Record<string, RunFailureUi> = {
     'chat.runError.title.artifactMissing',
     'chat.runError.artifactMissingMessage',
   ),
+  // A cloud-only agent (AMR) on an installation with no Open Design cloud
+  // account. Nothing to install and nothing a Retry changes: send the user to
+  // Settings to pick a local agent or a BYOK provider.
+  CLOUD_ACCOUNT_REQUIRED: {
+    primaryAction: 'open-settings',
+    titleKey: 'chat.runError.title.cloudAccountRequired',
+    messageKey: 'chat.runError.cloudAccountRequiredMessage',
+    secondaryRetry: false,
+    cloudSwitchCta: false,
+  },
   // CLI binary not found on PATH (user_action: install_cli).
   AGENT_UNAVAILABLE: retryWithGuidance(
     'chat.runError.title.cliMissing',

@@ -7,6 +7,10 @@ import { FileViewer } from '../../src/components/FileViewer';
 import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext } from '@open-design/contracts';
 import { CollabProvider, type CollabContextValue } from '../../src/collab/collab-context';
 import type { ProjectFile } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 afterEach(() => {
   cleanup();

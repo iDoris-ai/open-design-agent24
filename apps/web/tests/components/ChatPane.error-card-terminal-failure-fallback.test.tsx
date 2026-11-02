@@ -30,6 +30,22 @@ import { ChatPane } from '../../src/components/ChatPane';
 import { RECONNECT_OWNED_FAILURE_CODE } from '../../src/runtime/amr-guidance';
 import type { ChatReconnectView } from '../../src/runtime/chat/reconnect-state';
 import type { AppConfig, ChatMessage } from '../../src/types';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/IdentityBridge';
+
+// The switch-to-Cloud CTA only exists with a connected cloud account (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount({
+    id: 'cloud-test',
+    displayName: 'Cloud Test',
+    cloud: EnabledCloudAccount,
+  });
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 // 身份翻译:断言直接钉 i18n key,读得出「用的是哪条文案」。
 const translate = (key: string, vars?: Record<string, string | number>) => {

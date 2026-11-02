@@ -35,6 +35,10 @@ import {
 } from '../../src/collab/useWorkspaceContext';
 import { resetCoalescedGet } from '../../src/lib/coalesced-get';
 import { workspaceDirectoryFixture } from '../helpers/workspace-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const homeRouteMock = { kind: 'home' as const, view: 'home' as const };
 const useRouteMock = vi.fn<() => Route>(() => homeRouteMock);

@@ -7,6 +7,10 @@ import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCol
 import { FileViewer } from '../../src/components/FileViewer';
 import { CollabProvider, type CollabContextValue } from '../../src/collab/collab-context';
 import type { ShareLoginReturn } from '../../src/components/share/share-login-return';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const publication = { url: 'https://example.invalid/artifact/proj/stable', slug: 'stable', fileName: 'index.html' };
 const context: WorkspaceCollabContext = {

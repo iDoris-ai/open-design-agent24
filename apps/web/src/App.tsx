@@ -70,6 +70,8 @@ import type { ObservedPublicShareLink, ObservedShareUpdateRequest } from './comp
 import type { ShareLoginReturn } from './components/share/share-login-return';
 import { SignedOutObservedShare } from './components/share/SignedOutObservedShare';
 import { projectsForWorkspaceChrome } from './runtime/workspace-chrome-projects';
+import { isCloudAccountEnabled } from './identity/IdentityBridge';
+import { pendingProjectBelongsToWorkspace } from './state/projects';
 import { AmrArtifactUpgradeGate } from './components/AmrArtifactUpgradeGate';
 import { AmrArtifactUpgradeHomeCard } from './components/AmrArtifactUpgradeHomeCard';
 import { ExperienceSurvey } from './components/ExperienceSurvey';
@@ -1550,11 +1552,7 @@ function AppInner() {
       : projects.filter((project) =>
           pendingLocalProjectScopeRef.current === currentPendingLocalProjectScope
           && pendingLocalProjectIdsRef.current.has(project.id)
-          && (
-            workspaceContext === null
-              ? project.workspaceId == null
-              : project.workspaceId === workspaceContext.workspaceId
-          ));
+          && pendingProjectBelongsToWorkspace(project, workspaceContext));
     projectListScopeRef.current = currentProjectListScope;
     projectDisplayKeyRef.current = currentProjectDisplayKey;
     if (snapshot) {
@@ -2589,8 +2587,20 @@ function AppInner() {
   useEffect(() => {
     if (!daemonConfigLoaded || agentsLoading) return;
     if (config.onboardingCompleted !== true) return;
+    const cloudOff = !isCloudAccountEnabled();
+    if (cloudOff && config.agentId === 'amr') {
+      const replacement = agents.find((agent) => agent.available && agent.id !== 'amr');
+      setConfig((prev) => {
+        if (prev.agentId !== 'amr') return prev;
+        const next: AppConfig = { ...prev, agentId: replacement?.id ?? null };
+        saveConfig(next);
+        void syncConfigToDaemon(next);
+        return next;
+      });
+      return;
+    }
     if (config.agentId) return;
-    const firstAvailable = agents.find((a) => a.available);
+    const firstAvailable = agents.find((agent) => agent.available && !(cloudOff && agent.id === 'amr'));
     if (!firstAvailable) return;
     setConfig((prev) => {
       if (prev.agentId) return prev;
@@ -5980,7 +5990,7 @@ function AppInner() {
         onSignedOut={handleActiveCloudSignOut}
         onAmrLoginStatusChange={handleAmrLoginStatusChange}
         artifactUpgradeSlot={
-          amrArtifactUpgradeHomeOffer ? (
+          isCloudAccountEnabled() && amrArtifactUpgradeHomeOffer ? (
             <AmrArtifactUpgradeHomeCard
               key={amrArtifactUpgradeHomeOffer.sessionKey}
               profile={amrLoginStatus?.profile ?? null}
@@ -6126,7 +6136,7 @@ function AppInner() {
         onDismiss={() => trackExperienceSurveyDismissed(analytics.track)}
         onSubmit={(answers) => trackExperienceSurveySent(analytics.track, answers)}
       />
-      <AmrArtifactUpgradeGate
+      {isCloudAccountEnabled() ? <AmrArtifactUpgradeGate
         cloudModelSelected={config.mode === 'daemon' && config.agentId === 'amr'}
         homeVisible={route.kind === 'home' && route.view === 'home'}
         activeProjectId={route.kind === 'project' ? route.projectId : null}
@@ -6147,7 +6157,7 @@ function AppInner() {
             ? undefined
             : setAmrArtifactUpgradeHomeOffer
         }
-      />
+      /> : null}
       <AnimatePresence>
       {settingsOpen ? (
         renderSettingsSurface('modal')
@@ -6188,11 +6198,13 @@ function AppInner() {
           onDismiss={() => setProjectCreateError(null)}
         />
       ) : null}
-      <HomeAmrBalanceGateDialogs
-        block={homeAmrBalanceGateBlock}
-        metricsConsent={config.telemetry?.metrics === true}
-        installationId={config.installationId}
-      />
+      {isCloudAccountEnabled() ? (
+        <HomeAmrBalanceGateDialogs
+          block={homeAmrBalanceGateBlock}
+          metricsConsent={config.telemetry?.metrics === true}
+          installationId={config.installationId}
+        />
+      ) : null}
       {projectOpenError ? (
         <Toast
           message={projectOpenError}

@@ -26,6 +26,10 @@ import {
   workspaceDirectoryForIdentity,
 } from '../../src/components/EntryNavRail';
 import { I18nProvider } from '../../src/i18n';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 /**
  * Account A sees a shared team workspace plus its own personal one. Every item

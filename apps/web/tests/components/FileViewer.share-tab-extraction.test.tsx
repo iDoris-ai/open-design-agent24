@@ -18,6 +18,10 @@ import { resetCoalescedGet } from '../../src/lib/coalesced-get';
 import { TEAM_PROJECTS_CHANGED_EVENT } from '../../src/collab/useWorkspaceContext';
 import { PROJECT_SHARE_HISTORY_CHANGED_EVENT } from '../../src/components/share/share-publication-events';
 import type { ProjectFile } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 afterEach(() => {
   cleanup();

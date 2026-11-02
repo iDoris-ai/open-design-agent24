@@ -24,7 +24,7 @@ import type { Dict } from '../i18n/types';
 import { localizePluginDescription, localizePluginTitle } from './plugins-home/localization';
 import { describeRoutineSchedule, describeRoutineScheduleParts } from './routineScheduleLabels';
 import { useWorkspaceContext } from '../collab/useWorkspaceContext';
-import { workspaceProjectHeaders } from '../collab/workspace-identity';
+import { automationWorkspaceScopeFor, workspaceProjectHeaders } from '../collab/workspace-identity';
 
 type ProjectSummary = { id: string; name: string };
 type ScheduleKind = RoutineSchedule['kind'];
@@ -470,13 +470,8 @@ export function NewAutomationModal({
           ...(selectedPluginIds.length > 0 ? { pluginIds: selectedPluginIds } : {}),
           ...(selectedMcpIds.length > 0 ? { mcpServerIds: selectedMcpIds } : {}),
           ...(selectedConnectorIds.length > 0 ? { connectorIds: selectedConnectorIds } : {}),
-          ...(target.mode === 'create_each_run' && workspaceContext
-            ? {
-                workspaceScope: {
-                  workspaceId: workspaceContext.workspaceId,
-                  workspaceMemberId: workspaceContext.workspaceMemberId,
-                },
-              }
+          ...(target.mode === 'create_each_run' && automationWorkspaceScopeFor(workspaceContext)
+            ? { workspaceScope: automationWorkspaceScopeFor(workspaceContext) }
             : {}),
         },
         enabled: true,

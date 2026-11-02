@@ -8,6 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startServer } from '../../src/server.js';
+import { EnabledCloudAccount } from '../../src/identity/cloud-account.js';
 
 type StartedServer = {
   url: string;
@@ -62,7 +63,7 @@ describe('GET/POST /api/design-systems — explicit request scope is isolated fr
   let shutdown: (() => Promise<void> | void) | undefined;
 
   beforeAll(async () => {
-    const started = (await startServer({ port: 0, returnServer: true })) as StartedServer;
+    const started = (await startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount})) as StartedServer;
     baseUrl = started.url;
     server = started.server;
     shutdown = started.shutdown;

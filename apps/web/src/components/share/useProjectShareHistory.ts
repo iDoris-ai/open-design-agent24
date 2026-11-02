@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ProjectShareHistoryResponse, WorkspaceCollabContext } from '@open-design/contracts';
 import { currentWorkspaceAccountGeneration, workspaceAccountScopedCacheKey, workspaceProjectHeaders } from '../../collab/workspace-identity';
+import { isCloudAccountEnabled } from '../../identity/IdentityBridge';
 import { AMR_LOGIN_STATUS_EVENT } from '../amrLoginPolling';
 import { PROJECT_SHARE_HISTORY_CHANGED_EVENT } from './share-publication-events';
 
@@ -33,6 +34,18 @@ export function useProjectShareHistoryState(projectId: string | undefined, conte
       controller?.abort();
       setResult(null);
       if (!projectId) return;
+      if (!isCloudAccountEnabled()) {
+        setResult({
+          scope,
+          history: {
+            projectId,
+            hasEverShared: false,
+            bindingExists: false,
+            publications: [],
+          },
+        });
+        return;
+      }
       controller = new AbortController();
       void (async () => {
         let value: unknown;

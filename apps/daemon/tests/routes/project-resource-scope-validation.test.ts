@@ -3,6 +3,18 @@ import express from 'express';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerProjectRoutes } from '../../src/routes/project/index.js';
 import { workspaceContextFromDirectoryItem } from '../../src/collab/vela-workspace-context.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/cloud-account.js';
+
+// Workspace binding on project creation is cloud-account behaviour (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const WORKSPACE_ID = 'workspace-project-scope';
 const MEMBER_ID = 'member-project-scope';

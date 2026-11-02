@@ -13,6 +13,10 @@ import { providerModelsCacheKey } from '../../src/components/providerModelsCache
 import { resetWorkspaceContextCache } from '../../src/collab/useWorkspaceContext';
 import type { AgentInfo, AppConfig, ProviderModelOption } from '../../src/types';
 import { workspaceDirectoryFixture } from '../helpers/workspace-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const analyticsMocks = vi.hoisted(() => ({ track: vi.fn() }));
 

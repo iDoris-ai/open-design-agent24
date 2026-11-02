@@ -1,3 +1,5 @@
+import { isCloudAccountEnabled } from '../identity/cloud-account.js';
+
 export interface PersistedAutomationWorkspaceScope {
   workspaceId: string;
   workspaceMemberId: string;
@@ -18,6 +20,10 @@ export class AutomationWorkspaceScopeError extends Error {
 export function normalizePersistedAutomationWorkspaceScope(
   value: unknown,
 ): PersistedAutomationWorkspaceScope | null {
+  // Every automation scope read (Orbit, routines, media attribution) goes
+  // through here. With the cloud account disabled a stored scope, including
+  // the `local` stub an older web build persisted, means nothing.
+  if (!isCloudAccountEnabled()) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const workspaceId = typeof raw.workspaceId === 'string' ? raw.workspaceId.trim() : '';
@@ -54,7 +60,10 @@ export function bindProjectToPersistedAutomationWorkspace(
   projectId: string,
   now: number,
 ): void {
-  if (!scope) return;
+  // No cloud account, no Workspace: an automation's project is a plain local
+  // project. Binding it to a stored scope (the web's local stub stores
+  // `local`) would hide it from the unscoped `/api/projects` list.
+  if (!scope || !isCloudAccountEnabled()) return;
   ensureWorkspaceProject({
     projectId,
     workspaceId: scope.workspaceId,

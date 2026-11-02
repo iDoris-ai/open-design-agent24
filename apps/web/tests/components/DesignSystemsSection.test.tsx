@@ -10,6 +10,10 @@ import type { DesignSystemSummary } from '@open-design/contracts';
 import { DesignSystemsSection } from '../../src/components/DesignSystemsSection';
 import { fetchDesignSystems, updateDesignSystemDraft } from '../../src/providers/registry';
 import type { AppConfig } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const memoryCss = readFileSync(resolve(process.cwd(), 'src/styles/viewer/memory.css'), 'utf8');
 const memoryCssRoot = postcss.parse(memoryCss, { from: 'src/styles/viewer/memory.css' });

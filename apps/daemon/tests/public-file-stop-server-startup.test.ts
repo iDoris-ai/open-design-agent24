@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { startServer, type StartServerResult } from '../src/server.js';
 import * as publications from '../src/collab/public-file-publication-store.js';
 import * as velaStop from '../src/collab/vela-public-file-stop.js';
+import { EnabledCloudAccount } from '../src/identity/cloud-account.js';
 
 it('runs the real shared SQLite queue consumer once after server startup, deferring unavailable stops', async () => {
   const key = { resourceTeamId: 'startup-team', ownerMemberId: 'startup-owner', projectId: 'already-deleted', filePath: 'index.html', slug: 'still-public' };
@@ -26,7 +27,7 @@ it('runs the real shared SQLite queue consumer once after server startup, deferr
   });
   let started: StartServerResult | undefined;
   try {
-    started = await startServer({ port: 0, returnServer: true }) as StartServerResult;
+    started = await startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount}) as StartServerResult;
     expect(stores).toHaveLength(1);
     expect(startupSpy).toHaveBeenCalledWith(stores[0], prepare, expect.objectContaining({ run: expect.any(Function) }));
     expect(adapterSpy).toHaveBeenCalledWith(expect.objectContaining({ dataRoot: expect.any(String), configuredEnv: expect.any(Function) }));

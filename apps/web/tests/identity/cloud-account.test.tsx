@@ -1,0 +1,233 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
+import { I18nProvider } from '../../src/i18n';
+import {
+  EnabledCloudAccount,
+  LocalSingleUser,
+  currentIdentity,
+  installCloudAccount,
+  isCloudAccountEnabled,
+  isLocalSingleUserContext,
+  localWorkspaceContext,
+} from '../../src/identity/IdentityBridge';
+import { LocalAccountNotice, LocalShareUnavailableNotice } from '../../src/identity/LocalAccountNotice';
+import {
+  localAccountSentence,
+  localShareUnavailable,
+} from '../../src/identity/local-account-copy';
+import { checkAmrBalanceGate } from '../../src/runtime/amr-balance-gate';
+import { resolveRunFailureUi } from '../../src/runtime/amr-guidance';
+import { en } from '../../src/i18n/locales/en';
+import { zhCN } from '../../src/i18n/locales/zh-CN';
+import { zhTW } from '../../src/i18n/locales/zh-TW';
+import { th } from '../../src/i18n/locales/th';
+import {
+  fetchAmrModels,
+  fetchAmrWalletSnapshot,
+  readVelaLoginStatus,
+  startVelaLogin,
+} from '../../src/providers/daemon';
+import {
+  createProject,
+  listProjects,
+  pendingProjectBelongsToWorkspace,
+} from '../../src/state/projects';
+import {
+  automationWorkspaceScopeFor,
+  workspaceProjectHeaders,
+  workspaceResourceUrl,
+} from '../../src/collab/workspace-identity';
+import {
+  configForManualOrbitRun,
+  orbitWorkspaceScopePatch,
+} from '../../src/components/SettingsDialog';
+
+const CLOUD_HOST = /amr-api\.open-design\.ai|amr-link\.open-design\.ai|open-design\.ai\/(?:cloud|amr)(?:\/|$|\?)/;
+
+describe('LocalSingleUser', () => {
+  it('is the local iDoris identity with no cloud account', () => {
+    expect(currentIdentity()).toEqual(LocalSingleUser);
+    expect(LocalSingleUser).toEqual({ id: 'local', displayName: 'iDoris', cloud: null });
+    expect(isCloudAccountEnabled()).toBe(false);
+    const context = localWorkspaceContext();
+    expect(context.workspaceType).toBe('personal');
+    expect(context.workspaceId).toBe('local');
+    expect(context.providerMode).toBe('personal_byok');
+    expect(context.billingState).toBe('inactive');
+    expect(context.planId).toBeNull();
+    expect(context.permissions.canManageBilling).toBe(false);
+    expect(context.permissions.canShareProjects).toBe(false);
+    expect(isLocalSingleUserContext(context)).toBe(true);
+    expect(context).not.toBeNull();
+  });
+
+  it('installCloudAccount enables the cloud surface and restores the local default', () => {
+    expect(isCloudAccountEnabled()).toBe(false);
+    const restore = installCloudAccount({
+      id: 'cloud-test',
+      displayName: 'Cloud Test',
+      cloud: EnabledCloudAccount,
+    });
+    try {
+      expect(isCloudAccountEnabled()).toBe(true);
+      expect(currentIdentity().cloud).toEqual(EnabledCloudAccount);
+    } finally {
+      restore();
+    }
+    expect(currentIdentity()).toEqual(LocalSingleUser);
+    expect(isCloudAccountEnabled()).toBe(false);
+  });
+
+  it('speaks the account and share sentences in Chinese, English, and Thai', () => {
+    expect(localAccountSentence('zh-CN')).toBe('当前是本机用户，云账户未接入。');
+    expect(localAccountSentence('en')).toBe(
+      'This installation uses a local user. The cloud account is not connected.',
+    );
+    expect(localAccountSentence('th')).toBe(
+      'ตอนนี้เป็นผู้ใช้ในเครื่องนี้ บัญชีคลาวด์ยังไม่ได้เชื่อมต่อ',
+    );
+    expect(localShareUnavailable('zh-CN')).toContain('分享暂时不可用');
+    expect(localAccountSentence('zh-TW')).toBe('目前是本機使用者，雲端帳戶未連接。');
+    expect(localShareUnavailable('zh-TW')).toContain('分享暫時無法使用');
+    expect(localShareUnavailable('en')).toContain('Sharing is unavailable');
+    expect(localShareUnavailable('th')).toContain('ยังแชร์ไม่ได้');
+
+    const { unmount } = render(
+      <I18nProvider initial="zh-CN">
+        <LocalAccountNotice />
+        <LocalShareUnavailableNotice />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId('settings-local-account').textContent).toBe(
+      '当前是本机用户，云账户未接入。',
+    );
+    expect(screen.getByTestId('local-share-unavailable').textContent).toContain('分享暂时不可用');
+    unmount();
+  });
+
+  it('does not request amr-api or vela origins from the web choke points', async () => {
+    const seen: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      seen.push(url);
+      if (url === '/api/projects' || url.endsWith('/api/projects')) {
+        return new Response(JSON.stringify({ projects: [{ id: 'p1', name: 'local' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('unexpected', { status: 599 });
+    });
+    try {
+      expect(await checkAmrBalanceGate()).toEqual({ kind: 'allow' });
+      expect(await fetchAmrWalletSnapshot({ refresh: true })).toBeNull();
+      expect(await fetchAmrModels()).toBeNull();
+      expect(await readVelaLoginStatus({ refresh: true })).toEqual({
+        ok: false,
+        httpStatus: 404,
+        body: null,
+      });
+      expect((await startVelaLogin()).error).toBe('cloud-account-disabled');
+      const projects = await listProjects({ workspaceContext: localWorkspaceContext() });
+      expect(projects.map((project) => project.id)).toEqual(['p1']);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+    expect(seen.filter((url) => CLOUD_HOST.test(url))).toEqual([]);
+    expect(seen.some((url) => url.includes('/api/workspaces/local/projects'))).toBe(false);
+    expect(seen.some((url) => url === '/api/projects' || url.endsWith('/api/projects'))).toBe(true);
+    expect(seen.some((url) => url.includes('amr-api') || url.includes('/api/integrations/vela') || url.includes('/api/amr/'))).toBe(false);
+  });
+
+  it('sends no workspace identity for the local stub, so created projects stay in the unscoped list', async () => {
+    const local = localWorkspaceContext();
+    expect(workspaceProjectHeaders(local)).toEqual({});
+    expect(workspaceResourceUrl('/api/projects/p1/raw/index.html', local)).toBe(
+      '/api/projects/p1/raw/index.html',
+    );
+    // A real cloud workspace still carries its identity.
+    const team = { ...local, workspaceId: 'ws-team', workspaceType: 'team' as const };
+    expect(workspaceProjectHeaders(team)).toMatchObject({ 'x-od-workspace-id': 'ws-team' });
+    expect(workspaceResourceUrl('/x', team)).toContain('workspaceId=ws-team');
+
+    const requests: Array<{ url: string; headers: Record<string, string> }> = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers).forEach((value, key) => {
+        headers[key] = value;
+      });
+      requests.push({ url, headers });
+      if (init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({ project: { id: 'p-new', name: 'New' }, conversationId: 'c1' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ projects: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      await createProject({
+        name: 'New',
+        skillId: null,
+        designSystemId: null,
+        workspaceContext: local,
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+    const create = requests.find((request) => request.url.endsWith('/api/projects'));
+    expect(create).toBeDefined();
+    expect(Object.keys(create!.headers).filter((key) => key.startsWith('x-od-workspace'))).toEqual([]);
+  });
+
+  it('shows a no-retry "cloud account not connected" card for a refused AMR run', () => {
+    for (const agentId of ['amr', 'claude', null]) {
+      const ui = resolveRunFailureUi('CLOUD_ACCOUNT_REQUIRED', null, agentId);
+      expect(ui.titleKey).toBe('chat.runError.title.cloudAccountRequired');
+      expect(ui.messageKey).toBe('chat.runError.cloudAccountRequiredMessage');
+      expect(ui.primaryAction).toBe('open-settings');
+      expect(ui.secondaryRetry).toBe(false);
+    }
+    expect(resolveRunFailureUi('CLOUD_ACCOUNT_REQUIRED', null, 'amr').cloudSwitchCta).toBe(false);
+    expect(en['chat.runError.title.cloudAccountRequired']).toBe('Cloud account not connected');
+    expect(zhCN['chat.runError.title.cloudAccountRequired']).toBe('云账户未接入');
+    expect(zhTW['chat.runError.title.cloudAccountRequired']).toBe('雲端帳戶未連接');
+    expect(th['chat.runError.cloudAccountRequiredMessage']).toContain('BYOK');
+    for (const dict of [en, zhCN, zhTW, th]) {
+      expect(dict['chat.runError.cloudAccountRequiredMessage']).not.toBe('');
+    }
+  });
+
+  it('keeps an unbound pending project under the local stub when the list view changes', () => {
+    const local = localWorkspaceContext();
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: undefined }, local)).toBe(true);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: null } as never, local)).toBe(true);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: 'local' }, local)).toBe(true);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: 'ws-team' }, local)).toBe(false);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: undefined }, null)).toBe(true);
+    const team = { ...local, workspaceId: 'ws-team', workspaceType: 'team' as const };
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: undefined }, team)).toBe(false);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: 'ws-team' }, team)).toBe(true);
+  });
+
+  it('does not pin automations to the local stub', () => {
+    const local = localWorkspaceContext();
+    expect(automationWorkspaceScopeFor(local)).toBeNull();
+    const team = { ...local, workspaceId: 'ws-team', workspaceType: 'team' as const, workspaceMemberId: 'm1' };
+    expect(automationWorkspaceScopeFor(team)).toEqual({ workspaceId: 'ws-team', workspaceMemberId: 'm1' });
+    // A `local` scope stored by an older build is cleared, not kept.
+    const stale = { workspaceId: 'local', workspaceMemberId: 'local' };
+    expect(orbitWorkspaceScopePatch(local, stale)).toEqual({ workspaceScope: null });
+    expect(orbitWorkspaceScopePatch(null, stale)).toEqual({ workspaceScope: stale });
+    const config = { orbit: { enabled: true, time: '09:00', workspaceScope: stale } } as never;
+    expect(configForManualOrbitRun(config, local).orbit?.workspaceScope ?? null).toBeNull();
+  });
+});

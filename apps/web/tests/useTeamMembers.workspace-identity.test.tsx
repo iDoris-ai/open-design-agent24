@@ -43,6 +43,10 @@ import {
 } from './helpers/workspace-context';
 import { evictCoalescedGet } from '../src/lib/coalesced-get';
 import { workspaceIdentityCacheKey } from '../src/collab/workspace-identity';
+import { useEnabledCloudAccount } from './helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const CONTEXTS = {
   a: workspaceContextFixture({ workspaceId: 'ws-a', workspaceMemberId: 'mem-a' }),

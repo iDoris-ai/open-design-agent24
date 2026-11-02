@@ -42,6 +42,18 @@ import {
   strategyTaskTurnText,
   TEST_PROMPT_BUNDLE,
 } from '../strategies/strategy-task-test-fixtures.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/cloud-account.js';
+
+// These cases exercise the Vela telemetry sink, which DisabledCloudAccount never selects (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const BASE_ENV = {
   OPEN_DESIGN_VELA_TELEMETRY: 'off',

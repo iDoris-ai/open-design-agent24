@@ -192,6 +192,7 @@ import {
   resolveAmrBalanceBranch,
   type AmrBalanceBlockedDialogKind,
 } from '../runtime/amr-balance-branch';
+import { isCloudAccountEnabled } from '../identity/IdentityBridge';
 import { AmrBalanceDialog } from './AmrBalanceDialog';
 import { AmrOwnerTopUpDialog } from './chat/AmrOwnerTopUpDialog';
 import { markHistoryReplayLanded } from './chat/useCharReveal';
@@ -14664,7 +14665,7 @@ export function ProjectView({
       {onboardingEntryRef.current && hasPreviewableArtifact && !currentConversationStreaming ? (
         <FirstArtifactHint />
       ) : null}
-      {amrBalanceGateBlock?.dialog === 'ask_owner' || amrOwnerTopUpFromCard ? (
+      {isCloudAccountEnabled() && (amrBalanceGateBlock?.dialog === 'ask_owner' || amrOwnerTopUpFromCard) ? (
         /*
          * 非 owner 的成员。他拿不到账单动作,所以这张弹窗不外跳,而是给他一句
          * 可以直接发给所有者的话 —— 在此之前这一档只有一颗「暂不需要」(§6.Y)。
@@ -14677,7 +14678,7 @@ export function ProjectView({
           }}
         />
       ) : null}
-      {amrBalanceGateBlock?.dialog === 'upgrade' ? (
+      {isCloudAccountEnabled() && amrBalanceGateBlock?.dialog === 'upgrade' ? (
         <AmrBalanceDialog
           reason={amrBalanceGateBlock.reason}
           modelId={amrBalanceGateBlock.modelId}

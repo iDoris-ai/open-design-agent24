@@ -524,6 +524,13 @@ describe('App onboarding completion persistence', () => {
       expect(settingsCapture.resetOnboarding).toEqual(expect.any(Function));
       expect(screen.getByTestId('settings-onboarding-completed').textContent).toBe('true');
     });
+    // Boot hydration rebases onto the latest persisted config and syncs
+    // without allowOnboardingReset. That write is in flight after the first
+    // paint, so wait for it before resetting or it can become the last call.
+    await waitFor(() => {
+      expect(mockedFetchDaemonConfig).toHaveBeenCalled();
+      expect(mockedSyncConfigToDaemon).toHaveBeenCalled();
+    });
 
     act(() => {
       settingsCapture.resetOnboarding?.({

@@ -15,6 +15,10 @@ import { resetWorkspaceAccountGeneration } from "../../src/collab/workspace-iden
 import { resetConsumedActionRequestsForTests } from "../../src/runtime/action-request";
 import { FileViewer } from "../../src/components/FileViewer";
 import type { ProjectFile } from "../../src/types";
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const seam = vi.hoisted(() => ({ exportHtml: vi.fn(), fallbackPdf: vi.fn(), imageSnapshot: vi.fn(), guideInput: vi.fn(), track: vi.fn() }));
 vi.mock("../../src/analytics/provider", () => ({

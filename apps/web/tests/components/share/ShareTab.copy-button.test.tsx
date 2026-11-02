@@ -11,6 +11,10 @@ import { ShareButton } from '../../../src/components/share/ShareButton';
 import buttonStyles from '../../../src/components/share/ShareButton.module.css';
 import { I18nProvider } from '../../../src/i18n';
 import { readShareCss } from '../../helpers/read-share-css';
+import { useEnabledCloudAccount } from '../../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 

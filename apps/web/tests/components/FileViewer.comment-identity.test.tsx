@@ -5,6 +5,10 @@ import { FileViewer, commentAuthorAvatarColor } from '../../src/components/FileV
 import { AMR_LOGIN_STATUS_EVENT } from '../../src/components/amrLoginPolling';
 import { advanceWorkspaceAccountGeneration, resetWorkspaceAccountGeneration } from '../../src/collab/workspace-identity';
 import type { PreviewComment, ProjectFile } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const file: ProjectFile = { name: 'index.html', path: 'index.html', type: 'file', size: 100, mtime: 1, kind: 'html', mime: 'text/html' };
 const comment: PreviewComment = {

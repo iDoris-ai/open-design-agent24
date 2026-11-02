@@ -4,6 +4,7 @@ import { access, chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { EnabledCloudAccount } from '../src/identity/cloud-account.js';
 
 type StartedServer = {
   url: string;
@@ -15,6 +16,7 @@ type ServerModule = {
   startServer: (options: {
     port: number;
     returnServer: boolean;
+    cloudAccount?: { readonly kind: 'enabled' };
   }) => Promise<StartedServer>;
 };
 
@@ -68,7 +70,7 @@ describe('daemon startup route smoke', () => {
     process.env.OD_DATA_DIR = dataDir;
     vi.resetModules();
     const { startServer } = await import('../src/server.js') as ServerModule;
-    started = await startServer({ port: 0, returnServer: true });
+    started = await startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount});
   });
 
   afterAll(async () => {

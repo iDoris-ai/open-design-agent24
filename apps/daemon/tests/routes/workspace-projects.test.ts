@@ -9,6 +9,7 @@ import { startServer } from '../../src/server.js';
 import { registerProjectRoutes } from '../../src/routes/project/index.js';
 import { projectResourceIdFor } from '../../src/integrations/vela-team-projects.js';
 import { verifyWorkspaceRequestContext } from '../../src/collab/request-workspace-context.js';
+import { EnabledCloudAccount } from '../../src/identity/cloud-account.js';
 import {
   createWorkspaceDirectoryAuthorityBroker,
   type WorkspaceDirectoryFetchResult,
@@ -32,7 +33,7 @@ describe('workspace project routes', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    const started = (await startServer({ port: 0, returnServer: true })) as {
+    const started = (await startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount})) as {
       url: string;
       server: http.Server;
     };

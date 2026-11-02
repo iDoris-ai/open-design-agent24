@@ -1,4 +1,5 @@
 import { reportExperienceEvent } from '../observability/experience-diagnostics';
+import { isCloudAccountEnabled } from '../identity/IdentityBridge';
 import { conversationMetaLabel } from '../runtime/chat/conversation-time';
 export { conversationMetaLabel } from '../runtime/chat/conversation-time';
 import { QuoteBar } from './chat/QuoteBar';
@@ -2502,9 +2503,16 @@ export function ChatPane({
   // OPEND-2807 / G16: the failed run selects one fixed recovery action.
   // The classifier still owns approved copy and handoffs, never extra buttons.
   const failedRunUsesCloud = retryAssistant?.agentId === 'amr';
-  const showCloudRetry = Boolean(retryAssistant && failedRunUsesCloud && onRetry);
+  // ODX-3: the daemon refused a cloud-only agent because no Open Design cloud
+  // account is connected. A Retry would be refused the same way.
+  const cloudAccountRequired = failedRunErrorEvent?.code === 'CLOUD_ACCOUNT_REQUIRED';
+  const showCloudRetry = Boolean(
+    retryAssistant && failedRunUsesCloud && onRetry && !cloudAccountRequired,
+  );
+  // With the cloud account disabled there is no Cloud to switch to.
   const showCloudSwitchCta = Boolean(
     retryAssistant && !failedRunUsesCloud
+    && isCloudAccountEnabled()
     && (onSwitchToAmrAndRetry || onOpenAmrSettings),
   );
   const [supportDialogOpen, setSupportDialogOpen] = useState(false);

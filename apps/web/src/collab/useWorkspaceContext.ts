@@ -30,6 +30,8 @@ import {
   fetchTeamProjectsCatalog,
   resetTeamProjectMetadataRefreshOrdering,
 } from './team-projects-catalog';
+import type { EventStreamActiveReason } from '../hooks/useEventStream';
+import { isCloudAccountEnabled, localWorkspaceContext } from '../identity/IdentityBridge';
 import { useWorkspaceInvalidation } from './workspace-events';
 import {
   advanceWorkspaceAccountGeneration,
@@ -441,6 +443,12 @@ export async function resolveCurrentWorkspaceContextReadWitness(
 // last-known signed-in state instantly while the background read revalidates.
 let cachedWorkspaceContext: WorkspaceContextState['context'] = null;
 let cachedWorkspaceContextGeneration = 'initial';
+// The fork has no cloud directory. Seed the personal stub before the first
+// paint so a remount never starts from null and then fetches `/api/workspace`.
+if (!isCloudAccountEnabled()) {
+  cachedWorkspaceContext = localWorkspaceContext();
+  cachedWorkspaceContextGeneration = 'local';
+}
 let workspaceContextRevision = 0;
 let workspaceContextIdentityChangePending = false;
 const WORKSPACE_SELECTION_SESSION_KEY = 'od.workspaceSelection.v1';
@@ -591,6 +599,10 @@ export function resetWorkspaceContextCache(): void {
   resetWorkspaceContextRetrySchedules();
   inMemoryWorkspaceSelection = undefined;
   writeWorkspaceSelection(null);
+  if (!isCloudAccountEnabled()) {
+    cachedWorkspaceContext = localWorkspaceContext();
+    cachedWorkspaceContextGeneration = 'local';
+  }
 }
 
 /**
@@ -712,6 +724,21 @@ export function useWorkspaceContext(): WorkspaceContextState {
       exactScopeOnly?: boolean;
     } = {},
   ) => {
+    if (!isCloudAccountEnabled()) {
+      const local = localWorkspaceContext();
+      cachedWorkspaceContext = local;
+      cachedWorkspaceContextGeneration = 'local';
+      workspaceContextIdentityChangePending = false;
+      if (mountedRef.current) {
+        setState({
+          context: local,
+          resourceReadIdentity: { context: local, generation: 'local' },
+          loading: false,
+          identityChangePending: false,
+        });
+      }
+      return;
+    }
     const requestEpoch = ++requestEpochRef.current;
     const requestGeneration = workspaceContextRequestToken;
     if (options.markLoading && mountedRef.current) {
@@ -893,27 +920,36 @@ export function useWorkspaceContext(): WorkspaceContextState {
   // Collab realtime hop-2: subscribe to the workspace SSE and re-fetch on a
   // pushed `workspace-context-changed`. `connected` drives poll-as-floor below.
   // The re-fetch keeps the last-known context on failure rather than clearing it.
+  const cloudAccountEnabled = isCloudAccountEnabled();
   const { connected: sseConnected } = useWorkspaceInvalidation(
     // A pushed invalidation is authoritative new state. Reusing either settled
     // one-second cache here can keep a revoked Team membership selected until
     // the SSE-floor poll runs much later.
-    { 'workspace-context-changed': () => void loadContext({ fresh: true }) },
+    cloudAccountEnabled
+      ? { 'workspace-context-changed': () => void loadContext({ fresh: true }) }
+      : {},
     {
-      workspaceContext: state.context,
+      workspaceContext: cloudAccountEnabled ? state.context : null,
+      enabled: cloudAccountEnabled,
       // Reconnect is the gap-closing snapshot in the thin-event model. It must
       // bypass settled one-second directory/context answers: a membership
       // change may have landed while this browser had no sink, and accepting
       // that stale snapshot would immediately slow the fallback poll to the
       // healthy-SSE floor.
-      onActive: (reason) => void loadContext(
-        reason === 'ambient'
-          ? { exactScopeOnly: true }
-          : { fresh: true },
-      ),
+      ...(cloudAccountEnabled
+        ? {
+            onActive: (reason: EventStreamActiveReason) => void loadContext(
+              reason === 'ambient'
+                ? { exactScopeOnly: true }
+                : { fresh: true },
+            ),
+          }
+        : {}),
     },
   );
 
   useEffect(() => {
+    if (!isCloudAccountEnabled()) return;
     // Poll-as-floor: slow the poll while the SSE is delivering, run it at full
     // cadence when the stream is unavailable so there is no regression.
     const intervalMs = sseConnected ? WORKSPACE_CONTEXT_SSE_FLOOR_MS : WORKSPACE_CONTEXT_POLL_MS;
@@ -1255,7 +1291,7 @@ export function useWorkspaceBillingResponse(
   const workspaceMemberId = context?.workspaceMemberId?.trim() ?? '';
   const hasExactWorkspaceScope = Boolean(context && workspaceId && workspaceMemberId);
   const billingScopeKey =
-    contextLoading || !hasExactWorkspaceScope
+    !isCloudAccountEnabled() || contextLoading || !hasExactWorkspaceScope
       ? null
       : `workspace-billing:workspace:${workspaceId}:member:${workspaceMemberId}`;
   const billingUrl =
@@ -1555,8 +1591,11 @@ export function useWorkspaceBillingResponse(
       }
     },
   }, {
-    workspaceContext: context,
-    onActive: () => void loadBilling(false, true),
+    workspaceContext: isCloudAccountEnabled() ? context : null,
+    enabled: isCloudAccountEnabled(),
+    ...(isCloudAccountEnabled()
+      ? { onActive: () => void loadBilling(false, true) }
+      : {}),
   });
 
   useEffect(() => {
@@ -2301,8 +2340,11 @@ export function useTeamProjects(): TeamProjectsState {
       },
     },
     {
-      workspaceContext,
-      onActive: () => void loadFull(),
+      workspaceContext: isCloudAccountEnabled() ? workspaceContext : null,
+      enabled: isCloudAccountEnabled(),
+      ...(isCloudAccountEnabled()
+        ? { onActive: () => void loadFull() }
+        : {}),
     },
   );
 

@@ -39,6 +39,10 @@ import {
   extractBrandFromHtml,
   fetchBrands,
 } from '../../src/runtime/brands';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const brandBrowserBridgeMocks = vi.hoisted(() => ({
   getBrandBrowser: vi.fn(),

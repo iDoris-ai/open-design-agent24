@@ -6,6 +6,7 @@ import {
 } from './workspace-resource-mutation.js';
 import type { WorkspaceDirectoryFetchResult } from './vela-workspace-context.js';
 import { sendApiError } from '../http/api-errors.js';
+import { isCloudAccountEnabled } from '../identity/cloud-account.js';
 
 export type CreatedProjectWorkspaceResolution =
   | { ok: true; context: WorkspaceResourceContext | null }
@@ -53,6 +54,11 @@ export function sendCreatedProjectWorkspaceError(
 export function localProjectWorkspaceAttribution(
   req: unknown,
 ): WorkspaceResourceContext | null {
+  // No cloud account, no Workspace plane: every new project is a plain local
+  // project. Binding it to whatever id a request claimed (the web's local
+  // stub sends `local`) would move it out of the unscoped `/api/projects`
+  // list, so it would vanish after a refresh.
+  if (!isCloudAccountEnabled()) return null;
   const context = workspaceResourceContextFromRequest(req);
   return context === null || context === 'missing' ? null : context;
 }

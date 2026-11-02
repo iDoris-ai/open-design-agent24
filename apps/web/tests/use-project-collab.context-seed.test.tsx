@@ -19,6 +19,10 @@ import {
   useTeamProjects,
   useWorkspaceContext,
 } from '../src/collab/useWorkspaceContext';
+import { useEnabledCloudAccount } from './helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 function teamContext(): WorkspaceCollabContext {
   const role = 'member' as const;

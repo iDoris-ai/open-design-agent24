@@ -903,6 +903,20 @@ import { chatArtifactCaptureResultProps } from './chat-artifacts/telemetry.js';
 import { freezeAndRenderChatArtifactCovers } from './chat-artifacts/cover.js';
 import { setMessageArtifactHtmlVersionIds } from './chat-artifacts/store.js';
 import { registerVelaRoutes } from './routes/vela.js';
+import {
+  disabledCollabPresenceHandle,
+  disabledCollabSyncHandle,
+  disabledVelaRoutesLifecycle,
+  CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE,
+  LOCAL_USER_DISPLAY_NAME,
+  installCloudAccount,
+  isCloudAccountEnabled,
+  isCloudOnlyAgentId,
+  mountDisabledCloudAccountRoutes,
+  suspendCloudTransportEnv,
+  readCloudWorkspaceDirectory,
+  type CloudAccount,
+} from './identity/cloud-account.js';
 import { registerFinalizeRoutes, registerImportRoutes, registerProjectExportRoutes } from './import-export-routes.js';
 import { registerHandoffRoutes } from './routes/handoff.js';
 
@@ -3173,6 +3187,12 @@ export interface StartServerOptions {
   staticDir?: string;
   /** Opaque child-process environment supplied by the runtime integration seam. */
   inheritedEnvironment?: (baseEnv?: NodeJS.ProcessEnv) => Record<string, string>;
+  /**
+   * Tests that still exercise Vela, collab, billing, or share pass
+   * `EnabledCloudAccount`. Omitted leaves the process default,
+   * `DisabledCloudAccount`.
+   */
+  cloudAccount?: CloudAccount;
 
 }
 
@@ -3198,7 +3218,30 @@ export function createPersonalPublishedCommentMutationHandler(db: Database.Datab
     recordPersonalPublishedCommentMutation(db, comment, context, deleted);
 }
 
-export async function startServer({
+export async function startServer(options: StartServerOptions = {}) {
+  const restoreCloudAccount = options.cloudAccount
+    ? installCloudAccount(options.cloudAccount)
+    : undefined;
+  // Decided once, after the account is installed: with the cloud account
+  // disabled, OD_WORKSPACE_CONTEXT_SOURCE=vela / OD_COLLAB_TRANSPORT=vela-cli
+  // and friends are ignored for the life of this server.
+  const restoreCloudTransportEnv = suspendCloudTransportEnv();
+  let cloudAccountReleased = false;
+  const releaseCloudAccount = () => {
+    if (cloudAccountReleased) return;
+    cloudAccountReleased = true;
+    restoreCloudTransportEnv();
+    restoreCloudAccount?.();
+  };
+  try {
+    return await startServerNow(options, releaseCloudAccount);
+  } catch (error) {
+    releaseCloudAccount();
+    throw error;
+  }
+}
+
+async function startServerNow({
   port = 7456,
   host = normalizeDaemonBindHost(process.env.OD_BIND_HOST),
   returnServer = false,
@@ -3209,7 +3252,7 @@ export async function startServer({
   runtime = null,
   staticDir = STATIC_DIR,
   inheritedEnvironment = () => ({}),
-}: StartServerOptions = {}) {
+}: StartServerOptions, releaseCloudAccount: () => void) {
   host = normalizeDaemonBindHost(host);
   let resolvedPort = port;
   let daemonShuttingDown = false;
@@ -3875,6 +3918,7 @@ export async function startServer({
   const workspaceTypes = createWorkspaceTypeRegistry();
   const configuredAmrEnv = () =>
     agentCliEnvForAgent(readAppConfigSync(RUNTIME_DATA_DIR).agentCliEnv, 'amr');
+  const cloudAccountEnabled = isCloudAccountEnabled();
   const workspaceExactAuthorityCache = createWorkspaceExactAuthorityCache({
     identity: () => velaWorkspaceDirectoryIdentity(
       readVelaControlApiContext,
@@ -3883,9 +3927,9 @@ export async function startServer({
   });
   const workspaceDirectoryAuthority = createWorkspaceDirectoryAuthorityBroker({
     fetchDirectory: async () => {
-      const result = await fetchVelaWorkspaceDirectory({
+      const result = await readCloudWorkspaceDirectory(() => fetchVelaWorkspaceDirectory({
         configuredEnv: configuredAmrEnv(),
-      });
+      }));
       if (result.ok) workspaceTypes.learn(result.items);
       return result;
     },
@@ -4057,8 +4101,9 @@ export async function startServer({
     // A completely headerless local/signed-out request is the explicit legacy
     // lane: built-ins plus unclaimed local resources, and new resources remain
     // unbound. A half-specified identity is never that lane and is rejected by
-    // the verifier below.
-    if (claimed === null) return null;
+    // the verifier below. With the cloud account disabled every request is
+    // that lane: there is no Workspace for a design system to belong to.
+    if (claimed === null || !cloudAccountEnabled) return null;
     const verified = await verifyExplicitWorkspaceRequestContext({ req });
     if (!verified.ok) {
       throw Object.assign(new Error(verified.message), {
@@ -5183,7 +5228,8 @@ export async function startServer({
     }
     return verified;
   };
-  const presenceRoutes = registerCollabPresenceRoutes(app, {
+  if (!cloudAccountEnabled) mountDisabledCloudAccountRoutes(app);
+  const presenceRoutes = cloudAccountEnabled ? registerCollabPresenceRoutes(app, {
     collab,
     // Null when this run has no vela-cli collab transport, which is what keeps
     // the process-local presence fallback reachable. See
@@ -5212,7 +5258,7 @@ export async function startServer({
         workspaceId && authoritativePresenceWorkspaces.has(workspaceId),
       );
     },
-  });
+  }) : disabledCollabPresenceHandle();
   invalidatePresenceReadCache = presenceRoutes.invalidatePresence;
   markPresenceReadCacheStale = presenceRoutes.markPresenceStale;
   // Author-side publish TRIGGER (C spec §D1): watch the projects THIS daemon's
@@ -5338,6 +5384,7 @@ export async function startServer({
     db,
     readCursor: (projectId, context) => collabCloud?.readMergedCommentCursor(projectId, context) ?? null,
     compare: async (projectId, context, request) => {
+      if (!cloudAccountEnabled) return { state: 'unknown', reason: 'unavailable' };
       const session = readVelaControlApiContext(process.env, configuredAmrEnv());
       if (!session?.controlKey || !session.apiUrl) return { state: 'unknown', reason: 'unavailable' };
       const result = await runVelaCommentAlignment({
@@ -5355,10 +5402,11 @@ export async function startServer({
     db,
     authorize: resolveProjectCommentReadWorkspaceContext,
     service: createCommentSyncStateService(db, async scope => {
+      if (!cloudAccountEnabled) return false;
       const session = readVelaControlApiContext(process.env, configuredAmrEnv());
       if (!session?.controlKey) return false;
       if (!session.apiUrl) return null;
-      const directory = await fetchVelaWorkspaceDirectory({ readSession: () => session });
+      const directory = await readCloudWorkspaceDirectory(() => fetchVelaWorkspaceDirectory({ readSession: () => session }));
       const current = readVelaControlApiContext(process.env, configuredAmrEnv());
       if (current?.controlKey !== session.controlKey || current?.apiUrl !== session.apiUrl) return null;
       if (!directory.ok) return null;
@@ -5367,9 +5415,12 @@ export async function startServer({
         && item.memberStatus === 'active'
         && item.lifecycleState !== 'deleted' && item.lifecycleState !== 'deleting');
     }, { readAlign: scope => commentAlignment.read(scope),
-      readProjectShareState: createVelaProjectShareState({
-        dataRoot: RUNTIME_DATA_DIR, configuredEnv: configuredAmrEnv, registerLocallyOwnedProject: false,
-      }),
+      readProjectShareState: (scope) => {
+        if (!cloudAccountEnabled) return Promise.reject(new Error('SHARE_STATE_UNAVAILABLE'));
+        return createVelaProjectShareState({
+          dataRoot: RUNTIME_DATA_DIR, configuredEnv: configuredAmrEnv, registerLocallyOwnedProject: false,
+        })(scope);
+      },
       readCredential: () => {
         const current = readVelaControlApiContext(process.env, configuredAmrEnv());
         return current?.apiUrl && current.controlKey
@@ -5568,7 +5619,7 @@ export async function startServer({
       || projectIsUnmaterializedSharedPlaceholder(projectId)) return null;
     return typeof binding.createdByWorkspaceMemberId === 'string' ? binding.createdByWorkspaceMemberId : null;
   };
-  const collabSyncRoutes = registerCollabSyncRoutes(app, {
+  const collabSyncRoutes = cloudAccountEnabled ? registerCollabSyncRoutes(app, {
     collab,
     publicFilePublicationStore,
     // Recording a publication and queueing its existing comments for backfill
@@ -5807,7 +5858,7 @@ export async function startServer({
           },
         }
       : {}),
-  });
+  }) : disabledCollabSyncHandle();
   // Hub push-channel consumer for 'project-content-changed' (recvqmKQRiIlYf):
   // when a teammate publishes new content for a shared project, pull it NOW —
   // daemon-side, no open tab required — through the SAME flow the member
@@ -6225,7 +6276,7 @@ export async function startServer({
     }).catch(() => undefined);
   };
   let workspaceAnalyticsService: AnalyticsService | null = null;
-  registerCollabContextRoutes(app, {
+  if (cloudAccountEnabled) registerCollabContextRoutes(app, {
     workspaceContext: collab.workspaceContext,
     configuredEnv: configuredAmrEnv,
     verifyWorkspaceReadAuthority: verifyWorkspaceContextReadAuthority,
@@ -6512,7 +6563,7 @@ export async function startServer({
     resolveEndpoint: async () => {
       // Same gating as the workspace-context provider: only the vela source
       // has a hub to subscribe to (dev daemons must not dial production).
-      if (process.env.OD_WORKSPACE_CONTEXT_SOURCE?.trim() !== 'vela') return null;
+      if (!cloudAccountEnabled || process.env.OD_WORKSPACE_CONTEXT_SOURCE?.trim() !== 'vela') return null;
       return resolveVelaWorkspaceHubEventsEndpoint(
         subscribedWorkspaceId,
         process.env,
@@ -9329,6 +9380,7 @@ export async function startServer({
     },
     resolveWorkspaceContext: resolveProjectCommentWorkspaceContext,
     resolveCurrentAuthorDisplayName: () => {
+      if (!isCloudAccountEnabled()) return LOCAL_USER_DISPLAY_NAME;
       const user = readVelaControlApiContext(process.env, configuredAmrEnv())?.user;
       return user?.name?.trim() || user?.email?.trim() || null;
     },
@@ -9824,13 +9876,13 @@ export async function startServer({
     authorizeProjectToolRequest,
   });
 
-  const velaRoutesLifecycle = registerVelaRoutes(app, {
+  const velaRoutesLifecycle = cloudAccountEnabled ? registerVelaRoutes(app, {
     paths: { RUNTIME_DATA_DIR },
     appConfig: { readAppConfig },
     http: { getPublicBaseUrl },
     env: process.env,
     onCredentialStateObserved: refreshWorkspaceHubAccountIdentity,
-  });
+  }) : disabledVelaRoutesLifecycle();
 
   const allowScopedPluginReplace = (
     scope: { workspaceId: string; workspaceMemberId: string } | null,
@@ -11582,6 +11634,12 @@ export async function startServer({
     // Single choke point for the codex transport switch. Every other
     // agent — and codex with the switch off — gets back the identical
     // registry object, so nothing below can tell this call happened.
+    // The one run-start gate for the cloud-only agent: chat, CLI/MCP,
+    // automations, and same-run retries all enter here. Detection hides AMR,
+    // but an old session or a scripted caller can still name it, and it would
+    // spend the user's Open Design credits through ~/.amr.
+    if (!isCloudAccountEnabled() && isCloudOnlyAgentId(agentId))
+      return failRun('CLOUD_ACCOUNT_REQUIRED', CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE);
     const def = applyCodexTransportOverride(getAgentDef(agentId));
     if (!def)
       return failRun(
@@ -18525,23 +18583,25 @@ export async function startServer({
         void cleanupAbandonedPinnedVelaSessions(RUNTIME_DATA_DIR).then(({ failed }) => {
           if (failed) console.warn('[od] private CLI session cleanup incomplete');
         }).catch(() => { console.warn('[od] private CLI session cleanup unavailable'); });
-        void retryShareBindingsAtStartup().then(result => {
-          if (result.deferred || result.failed || result.persistenceFailures) {
-            console.warn(`[od] public share binding completion pending: ${JSON.stringify(result)}`);
-          }
-        }).catch(() => { console.warn('[od] public share binding completion unavailable'); });
-        void retryPublicFileStopsAtStartup().then((result) => {
-          if (result.deferred || result.failed || result.persistenceFailures) {
+        if (cloudAccountEnabled) {
+          void retryShareBindingsAtStartup().then(result => {
+            if (result.deferred || result.failed || result.persistenceFailures) {
+              console.warn(`[od] public share binding completion pending: ${JSON.stringify(result)}`);
+            }
+          }).catch(() => { console.warn('[od] public share binding completion unavailable'); });
+          void retryPublicFileStopsAtStartup().then((result) => {
+            if (result.deferred || result.failed || result.persistenceFailures) {
+              console.warn(
+                `[od] public share cleanup incomplete: ${JSON.stringify(result)}; queued links may remain public`,
+              );
+            }
+          }).catch(() => {
             console.warn(
-              `[od] public share cleanup incomplete: ${JSON.stringify(result)}; queued links may remain public`,
+              "[od] public share cleanup could not read its queue; queued links may remain public",
             );
-          }
-        }).catch(() => {
-          console.warn(
-            "[od] public share cleanup could not read its queue; queued links may remain public",
-          );
-        });
-        startAmrTerminalReportDeliveryAfterBind(amrTerminalReportDelivery, boundPort);
+          });
+          startAmrTerminalReportDeliveryAfterBind(amrTerminalReportDelivery, boundPort);
+        }
         messageEventPayloadHeal ??= startMessageEventPayloadHeal({ db });
         // Only once listening: a startup-time fatal report would add lines to
         // the log tail that packaged startup telemetry samples.
@@ -18572,11 +18632,15 @@ export async function startServer({
       });
     } catch (error) {
       cleanupDaemonBackgroundWork();
+      releaseCloudAccount();
       reject(error);
       return;
     }
     server.once('close', () => {
-      void shutdownDaemonRuns().finally(cleanupDaemonBackgroundWork);
+      void shutdownDaemonRuns().finally(() => {
+        cleanupDaemonBackgroundWork();
+        releaseCloudAccount();
+      });
     });
     // `app.listen` throws synchronously when the port is already in use on
     // some Node versions, but emits an `error` event on others (and for
@@ -18584,6 +18648,7 @@ export async function startServer({
     // returned Promise always settles instead of hanging forever.
     server.on('error', (error) => {
       cleanupDaemonBackgroundWork();
+      releaseCloudAccount();
       reject(error);
     });
   });

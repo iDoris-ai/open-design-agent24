@@ -28,6 +28,18 @@ import {
   listDesignSystems,
 } from '../src/design-systems/index.js';
 import type { PrefetchResult } from '../src/brands/prefetch.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../src/identity/cloud-account.js';
+
+// Workspace binding on project creation is cloud-account behaviour (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const NO_LOGO_FALLBACK = async () => ({ changed: false });
 const NO_IMAGERY_FALLBACK = async () => ({ changed: false });

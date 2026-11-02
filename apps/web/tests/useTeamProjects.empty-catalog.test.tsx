@@ -7,6 +7,10 @@ vi.mock('../src/collab/workspace-events', () => ({
 import { resetCoalescedGet } from '../src/lib/coalesced-get';
 import { resetWorkspaceContextCache, resetTeamProjectsCache, notifyTeamProjectsChanged, useTeamProjects, useWorkspaceContext } from '../src/collab/useWorkspaceContext';
 import { workspaceContextFixture, workspaceDirectoryFixture } from './helpers/workspace-context';
+import { useEnabledCloudAccount } from './helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 afterEach(() => {
   cleanup();

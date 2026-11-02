@@ -6,6 +6,10 @@ import type { ComponentProps } from 'react';
 import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext } from '@open-design/contracts';
 import { FileViewer } from '../../src/components/FileViewer';
 import { CollabProvider, type CollabContextValue } from '../../src/collab/collab-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const publication = { url: 'https://viewer.example.test/artifact/proj/stable', slug: 'stable', fileName: 'index.html' };
 const context: WorkspaceCollabContext = {

@@ -12,6 +12,10 @@ import {
 } from '../../src/collab/useWorkspaceContext';
 import { currentWorkspaceAccountGeneration } from '../../src/collab/workspace-identity';
 import { workspaceContextFixture, workspaceDirectoryFixture } from '../helpers/workspace-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const owner = workspaceContextFixture({
   workspaceId: 'ws-upgrade', workspaceMemberId: 'member-upgrade', role: 'owner',

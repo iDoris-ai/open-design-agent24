@@ -1,4 +1,5 @@
 import type { EvalContextV2 } from './observability/eval-context.js';
+import { activeCloudAccount, type CloudAccount } from './identity/cloud-account.js';
 // Langfuse trace forwarding for completed agent runs.
 //
 // This module is intentionally dependency-free (no `langfuse` SDK). It builds
@@ -497,8 +498,9 @@ export function readTelemetrySinkConfig(
 export function readTaskTelemetrySinkConfig(
   env: NodeJS.ProcessEnv = process.env,
   configuredEnv: Record<string, string> = {},
+  cloudAccount: CloudAccount = activeCloudAccount(),
 ): RunTelemetrySinkConfig | null {
-  return readRunTelemetrySinkConfig(env, configuredEnv);
+  return readRunTelemetrySinkConfig(env, configuredEnv, cloudAccount);
 }
 
 function isVelaTelemetryEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -515,8 +517,13 @@ function isVelaTelemetryEnabled(env: NodeJS.ProcessEnv): boolean {
 export function readRunTelemetrySinkConfig(
   env: NodeJS.ProcessEnv = process.env,
   configuredEnv: Record<string, string> = {},
+  cloudAccount: CloudAccount = activeCloudAccount(),
 ): RunTelemetrySinkConfig | null {
-  if (isVelaTelemetryEnabled(env)) {
+  // The Vela sink authenticates with the user's Open Design Control Key and
+  // posts to amr-api. A key left in ~/.amr or VELA_CONTROL_KEY by an upstream
+  // OD / vela CLI install must not reach it while the cloud account is
+  // disabled; fall through to the anonymous relay / direct Langfuse / none.
+  if (cloudAccount.kind === 'enabled' && isVelaTelemetryEnabled(env)) {
     const context = readVelaControlApiContext(env, configuredEnv);
     const controlKey = context?.controlKey?.trim() ?? '';
     if (context && controlKey) {
@@ -548,8 +555,9 @@ export function readRunTelemetrySinkConfig(
 export function readFeedbackTelemetrySinkConfig(
   env: NodeJS.ProcessEnv = process.env,
   configuredEnv: Record<string, string> = {},
+  cloudAccount: CloudAccount = activeCloudAccount(),
 ): RunTelemetrySinkConfig | null {
-  return readRunTelemetrySinkConfig(env, configuredEnv);
+  return readRunTelemetrySinkConfig(env, configuredEnv, cloudAccount);
 }
 
 export interface EffectiveRunTelemetrySinkDiagnostic {

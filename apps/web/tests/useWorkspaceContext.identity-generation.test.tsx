@@ -28,6 +28,10 @@ import {
   workspaceContextFixture,
   workspaceDirectoryFixture,
 } from './helpers/workspace-context';
+import { useEnabledCloudAccount } from './helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const CONTEXTS = {
   a: workspaceContextFixture({ workspaceId: 'ws-a', workspaceMemberId: 'mem-a' }),

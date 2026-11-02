@@ -8,6 +8,10 @@ import type { ConnectorDetail } from '@open-design/contracts';
 import { SettingsDialog } from '../../src/components/SettingsDialog';
 import { fetchConnectors, fetchDesignTemplates, fetchSkills } from '../../src/providers/registry';
 import type { AppConfig } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 vi.mock('../../src/providers/registry', async () => {
   const actual = await vi.importActual<typeof import('../../src/providers/registry')>(

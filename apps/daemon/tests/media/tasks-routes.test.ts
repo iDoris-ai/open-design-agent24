@@ -3,6 +3,7 @@ import path from 'node:path';
 import { stat, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { EnabledCloudAccount } from '../../src/identity/cloud-account.js';
 import {
   closeDatabase,
   ensureWorkspaceProject,
@@ -378,7 +379,7 @@ describe('media task route recovery', () => {
     vi.stubEnv('VELA_CONTROL_KEY', 'test-control-key');
     vi.stubEnv('VELA_API_URL', `http://127.0.0.1:${authorityAddress.port}`);
 
-    const started = await startServer({ port: 0, returnServer: true }) as {
+    const started = await startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount }) as {
       url: string;
       server: http.Server;
     };

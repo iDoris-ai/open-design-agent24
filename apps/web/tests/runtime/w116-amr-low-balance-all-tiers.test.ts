@@ -7,6 +7,10 @@ import {
   fetchAmrWalletSnapshot,
   fetchVelaLoginStatus,
 } from '../../src/providers/daemon';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 vi.mock('../../src/providers/daemon', () => ({
   fetchAmrWalletSnapshot: vi.fn(),

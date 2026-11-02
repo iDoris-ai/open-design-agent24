@@ -11,6 +11,18 @@ import {
 import { buildPromptStackTelemetry } from '../src/prompt-telemetry.js';
 import { readObjectEvidence } from '../src/services/evidence-delivery.js';
 import { taskTraceReceipts } from '../src/observability/task-telemetry-receipt.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../src/identity/cloud-account.js';
+
+// These cases exercise the Vela telemetry sink, which DisabledCloudAccount never selects (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 interface FakeMessage {
   id: string;

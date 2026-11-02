@@ -5,6 +5,10 @@ import {
   fetchAmrModels,
   fetchAmrWalletSnapshot,
 } from '../../src/providers/daemon';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 describe('canUpgradeVelaPlan', () => {
   it('is upgradeable for a known tier below the top', () => {

@@ -44,6 +44,10 @@ import {
   resetWorkspaceContextCache,
 } from '../../src/collab/useWorkspaceContext';
 import { resetWorkspaceDirectoryCache } from '../../src/components/EntryNavRail';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const PROJECT_ROUTE: Route = {
   kind: 'project' as const,

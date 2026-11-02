@@ -30,6 +30,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { FileViewer } from '../../src/components/FileViewer';
 import { resetConsumedActionRequestsForTests } from '../../src/runtime/action-request';
 import type { ProjectFile } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 afterEach(() => {
   cleanup();

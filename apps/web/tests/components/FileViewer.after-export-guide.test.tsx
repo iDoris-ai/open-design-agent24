@@ -3,6 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileViewer } from '../../src/components/FileViewer';
 import type { ProjectFile } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const seam = vi.hoisted(() => ({ exportHtml: vi.fn(), complete: vi.fn(), begin: vi.fn(), options: vi.fn() }));
 vi.mock('../../src/runtime/exports', async () => ({

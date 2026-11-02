@@ -17,6 +17,7 @@ import { defaultMediaExecutionPolicy, mediaPolicyDenial } from '../media/policy.
 import { formatMediaTaskDiagnostic } from '../media/diagnostics.js';
 import { findMediaModel, type MediaModel } from '../media/models.js';
 import { fetchVelaVideoModels } from '../media/vela.js';
+import { isCloudAccountEnabled } from '../identity/cloud-account.js';
 import type { CloudVideoModelsResponse } from '@open-design/contracts';
 import type { ImageGenerationRequestSummary } from '../media/image-generation-retry.js';
 import type { RouteDeps } from '../server-context.js';
@@ -46,6 +47,9 @@ import { scaffoldHyperFramesComposition } from '../media/hyperframes-scaffold.js
 import { assignMediaTaskBatches } from '../media/task-batches.js';
 import { mediaTaskErrorFromFailure } from '../media/task-error.js';
 import { normalizePersistedAutomationWorkspaceScope } from '../automations/workspace-scope.js';
+
+const CLOUD_STOCK_SEARCH_UNAVAILABLE_MESSAGE =
+  'Stock photo search is not available: it runs on the Open Design cloud account, which is not connected. Use web or image search for these slots instead.';
 
 const LONG_MEDIA_PROXY_TIMEOUT_MS = 10 * 60 * 1000;
 const MEDIA_FILE_MTIME_TOLERANCE_MS = 1;
@@ -685,6 +689,9 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
   };
   app.get('/api/media/models', async (req, res) => {
     if (req.query.cloud === 'true') {
+      if (!isCloudAccountEnabled()) {
+        return sendApiError(res, 503, 'MEDIA_CATALOG_UNAVAILABLE', 'Open Design cloud media is not available: the cloud account is not connected.');
+      }
       if (!isLocalSameOrigin(req, getResolvedPort())) return res.status(403).json({ error: 'cross-origin request rejected' });
       const grant = optionalToolGrantFromRequest(req, { operation: 'media:generate' });
       const projectId = grant?.projectId ?? (typeof req.query.projectId === 'string' ? req.query.projectId : '');
@@ -852,7 +859,7 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
         const scope = normalizePersistedAutomationWorkspaceScope(
           req.body.orbit.workspaceScope,
         );
-        if (req.body.orbit.workspaceScope !== null && !scope) {
+        if (req.body.orbit.workspaceScope !== null && !scope && isCloudAccountEnabled()) {
           return res.status(400).json({
             error: 'Orbit Workspace scope must contain workspaceId and workspaceMemberId',
             code: 'WORKSPACE_CONTEXT_INCOMPLETE',
@@ -1025,6 +1032,13 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
   });
 
   const handleStockSearch = async (req: any, res: any, projectId: string, grant: ToolTokenGrant | null) => {
+    // The stock service is reached through the vela CLI with the user's
+    // ~/.amr login (amr-api). With the cloud account disabled, answer the
+    // CLI's own "unavailable" code so `od media stock-search` exits 5 and the
+    // od-next-media-inputs skill falls back to web/image search.
+    if (!isCloudAccountEnabled()) {
+      return sendApiError(res, 503, 'STOCK_SEARCH_UNAVAILABLE', CLOUD_STOCK_SEARCH_UNAVAILABLE_MESSAGE);
+    }
     const project = getProject(db, projectId);
     if (!project) return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'project not found');
     let request: StockSearchRequest;

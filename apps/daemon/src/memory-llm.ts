@@ -76,6 +76,11 @@ import {
   spawnEnvForAgent,
 } from './agents.js';
 import { agentCliEnvForAgent, readAppConfig } from './app-config.js';
+import {
+  CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE,
+  isCloudAccountEnabled,
+  isCloudOnlyAgentId,
+} from './identity/cloud-account.js';
 import { createJsonEventStreamHandler } from './runtimes/json-event-stream.js';
 
 const SYSTEM_PROMPT = `You are a memory extractor for a personal AI design assistant.
@@ -961,6 +966,9 @@ async function callLocalCli(provider, system, user, options) {
     });
   }
 
+  if (!isCloudAccountEnabled() && isCloudOnlyAgentId(provider.agentId)) {
+    throw new Error(CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE);
+  }
   const def = getAgentDef(provider.agentId);
   if (!def) {
     throw new Error(`Local CLI agent "${provider.agentId}" is not installed`);

@@ -4,6 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext } from '@open-design/contracts';
 import { DesignsTab } from '../../src/components/DesignsTab';
 import type { Project } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const context: WorkspaceCollabContext = {
   workspaceId: 'ws', workspaceType: 'personal', workspaceMemberId: 'member', role: 'owner',

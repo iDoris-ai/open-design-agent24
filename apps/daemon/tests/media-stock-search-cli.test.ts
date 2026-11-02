@@ -12,6 +12,18 @@ import { closeDatabase, insertProject, openDatabase } from '../src/db.js';
 import { ensureProject } from '../src/projects.js';
 import { startServer } from '../src/server.js';
 import { toolTokenRegistry } from '../src/tool-tokens.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../src/identity/cloud-account.js';
+
+// Routine Workspace scope and cloud stock search are cloud-account behaviour (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 vi.mock('../src/integrations/vela-command.js', async (original) => ({ ...await original<typeof import('../src/integrations/vela-command.js')>(), runVelaCommand: vi.fn() }));
 

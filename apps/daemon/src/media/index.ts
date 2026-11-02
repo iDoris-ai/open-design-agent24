@@ -96,7 +96,8 @@ import {
   resolveHyperFramesNodeBin,
 } from './hyperframes-runtime.js';
 import { prepareHyperFramesAudio, hyperFramesAudioEncodingArgs, type HyperFramesAudioTrack } from './hyperframes-audio.js';
-import { renderVelaImage, renderVelaVideo } from './vela.js';
+import { renderVelaImage, renderVelaVideo, VelaMediaError } from './vela.js';
+import { isCloudAccountEnabled } from '../identity/cloud-account.js';
 import {
   ensureProject,
   kindFor,
@@ -608,6 +609,14 @@ export async function generateMedia(args: {
     customImageCredentials,
   );
   try {
+    // Vela media renders bill the Open Design cloud account through the vela
+    // CLI. With the account disabled there is nothing to bill against.
+    if (def.provider === 'vela' && !isCloudAccountEnabled()) {
+      throw new VelaMediaError(
+        'Open Design cloud media is not available: the cloud account is not connected. Pick a BYOK media provider.',
+        { code: 'MEDIA_MODEL_UNAVAILABLE', retryable: false },
+      );
+    }
     if (
       def.provider === 'openai'
       && surface === 'image'

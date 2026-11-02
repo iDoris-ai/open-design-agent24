@@ -9,6 +9,10 @@ import {
   type MessageCenterMessage,
   writeArchivedIds,
 } from '../src/message-center-client';
+import { useEnabledCloudAccount } from './helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 describe('message center client', () => {
   beforeEach(() => vi.restoreAllMocks());
