@@ -272,6 +272,24 @@ function omitWorkspaceContext<T extends { workspaceContext?: WorkspaceCollabCont
   return rest;
 }
 
+/**
+ * Does a just-created (pending) project belong to the list scope `context`?
+ *
+ * The local single-user stub is not a Workspace: its projects are unbound
+ * (`workspaceId` absent), exactly as with no context at all. An older build
+ * may have stamped the stub id `local` on an optimistic row; accept that too.
+ */
+export function pendingProjectBelongsToWorkspace(
+  project: Pick<Project, 'workspaceId'>,
+  context: WorkspaceCollabContext | null,
+): boolean {
+  if (context === null) return project.workspaceId == null;
+  if (isLocalSingleUserContext(context)) {
+    return project.workspaceId == null || project.workspaceId === context.workspaceId;
+  }
+  return project.workspaceId === context.workspaceId;
+}
+
 export async function listProjects(options?: {
   throwOnError?: boolean;
   workspaceContext?: WorkspaceCollabContext | null;

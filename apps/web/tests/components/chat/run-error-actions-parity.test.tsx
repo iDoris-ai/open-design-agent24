@@ -26,6 +26,22 @@ import { Button } from '@open-design/components';
 
 import { ChatPane } from '../../../src/components/ChatPane';
 import type { AppConfig, ChatMessage } from '../../../src/types';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../../src/identity/IdentityBridge';
+
+// The switch-to-Cloud CTA only exists with a connected cloud account (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount({
+    id: 'cloud-test',
+    displayName: 'Cloud Test',
+    cloud: EnabledCloudAccount,
+  });
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 vi.mock('../../../src/i18n', () => ({
   useI18n: () => ({ locale: 'en', setLocale: () => undefined, t: (key: string) => key }),

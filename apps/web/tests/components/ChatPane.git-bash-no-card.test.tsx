@@ -13,6 +13,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatPane } from '../../src/components/ChatPane';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import type { ChatMessage } from '../../src/types';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/IdentityBridge';
+
+// The switch-to-Cloud CTA only exists with a connected cloud account (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount({
+    id: 'cloud-test',
+    displayName: 'Cloud Test',
+    cloud: EnabledCloudAccount,
+  });
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const translate = (key: string, vars?: Record<string, string | number>) => {
   const raw = zhCN[key as keyof typeof zhCN] ?? key;

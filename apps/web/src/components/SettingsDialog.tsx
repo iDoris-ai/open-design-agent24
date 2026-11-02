@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { automationWorkspaceScopeFor } from '../collab/workspace-identity';
 import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import { Button, VisuallyHidden } from '@open-design/components';
 import type {
@@ -6878,6 +6879,21 @@ export async function persistConfigAndRunOrbit(
   return await response.json() as OrbitRunStartResponse;
 }
 
+/**
+ * Orbit's stored Workspace scope for the current context. A real Workspace
+ * pins its id; the local single-user stub clears any scope (including a
+ * `local` one an older build stored); no context keeps what was stored.
+ */
+export function orbitWorkspaceScopePatch(
+  workspaceContext: WorkspaceCollabContext | null,
+  stored: NonNullable<AppConfig['orbit']>['workspaceScope'] | undefined,
+): Pick<NonNullable<AppConfig['orbit']>, 'workspaceScope'> | Record<string, never> {
+  const scope = automationWorkspaceScopeFor(workspaceContext);
+  if (scope) return { workspaceScope: scope };
+  if (workspaceContext) return { workspaceScope: null };
+  return stored ? { workspaceScope: stored } : {};
+}
+
 export function configForManualOrbitRun(
   config: AppConfig,
   workspaceContext: WorkspaceCollabContext | null = null,
@@ -6888,16 +6904,7 @@ export function configForManualOrbitRun(
     orbit: {
       ...(config.orbit ?? DEFAULT_ORBIT),
       ...(effectiveTemplateSkillId ? { templateSkillId: effectiveTemplateSkillId } : {}),
-      ...(workspaceContext
-        ? {
-            workspaceScope: {
-              workspaceId: workspaceContext.workspaceId,
-              workspaceMemberId: workspaceContext.workspaceMemberId,
-            },
-          }
-        : config.orbit?.workspaceScope
-          ? { workspaceScope: config.orbit.workspaceScope }
-          : {}),
+      ...orbitWorkspaceScopePatch(workspaceContext, config.orbit?.workspaceScope),
     },
   };
 }
@@ -6995,16 +7002,7 @@ function OrbitSection({
       orbit: {
         ...(curr.orbit ?? DEFAULT_ORBIT),
         ...patch,
-        ...(workspaceContext
-          ? {
-              workspaceScope: {
-                workspaceId: workspaceContext.workspaceId,
-                workspaceMemberId: workspaceContext.workspaceMemberId,
-              },
-            }
-          : curr.orbit?.workspaceScope
-            ? { workspaceScope: curr.orbit.workspaceScope }
-            : {}),
+        ...orbitWorkspaceScopePatch(workspaceContext, curr.orbit?.workspaceScope),
       },
     }));
   };

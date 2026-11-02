@@ -22,6 +22,22 @@ import {
   saveMessage,
 } from '../../src/state/projects';
 import type { AgentInfo, AppConfig, ChatCommentAttachment, ChatMessage, Conversation, Project } from '../../src/types';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/IdentityBridge';
+
+// The switch-to-Cloud CTA only exists with a connected cloud account (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount({
+    id: 'cloud-test',
+    displayName: 'Cloud Test',
+    cloud: EnabledCloudAccount,
+  });
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const workspace = vi.hoisted(() => ({
   caller: null as WorkspaceCollabContext | null,

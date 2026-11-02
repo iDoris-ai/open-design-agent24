@@ -20,17 +20,31 @@ import {
   localShareUnavailable,
 } from '../../src/identity/local-account-copy';
 import { checkAmrBalanceGate } from '../../src/runtime/amr-balance-gate';
+import { resolveRunFailureUi } from '../../src/runtime/amr-guidance';
+import { en } from '../../src/i18n/locales/en';
+import { zhCN } from '../../src/i18n/locales/zh-CN';
+import { zhTW } from '../../src/i18n/locales/zh-TW';
+import { th } from '../../src/i18n/locales/th';
 import {
   fetchAmrModels,
   fetchAmrWalletSnapshot,
   readVelaLoginStatus,
   startVelaLogin,
 } from '../../src/providers/daemon';
-import { createProject, listProjects } from '../../src/state/projects';
 import {
+  createProject,
+  listProjects,
+  pendingProjectBelongsToWorkspace,
+} from '../../src/state/projects';
+import {
+  automationWorkspaceScopeFor,
   workspaceProjectHeaders,
   workspaceResourceUrl,
 } from '../../src/collab/workspace-identity';
+import {
+  configForManualOrbitRun,
+  orbitWorkspaceScopePatch,
+} from '../../src/components/SettingsDialog';
 
 const CLOUD_HOST = /amr-api\.open-design\.ai|amr-link\.open-design\.ai|open-design\.ai\/(?:cloud|amr)(?:\/|$|\?)/;
 
@@ -172,5 +186,48 @@ describe('LocalSingleUser', () => {
     const create = requests.find((request) => request.url.endsWith('/api/projects'));
     expect(create).toBeDefined();
     expect(Object.keys(create!.headers).filter((key) => key.startsWith('x-od-workspace'))).toEqual([]);
+  });
+
+  it('shows a no-retry "cloud account not connected" card for a refused AMR run', () => {
+    for (const agentId of ['amr', 'claude', null]) {
+      const ui = resolveRunFailureUi('CLOUD_ACCOUNT_REQUIRED', null, agentId);
+      expect(ui.titleKey).toBe('chat.runError.title.cloudAccountRequired');
+      expect(ui.messageKey).toBe('chat.runError.cloudAccountRequiredMessage');
+      expect(ui.primaryAction).toBe('open-settings');
+      expect(ui.secondaryRetry).toBe(false);
+    }
+    expect(resolveRunFailureUi('CLOUD_ACCOUNT_REQUIRED', null, 'amr').cloudSwitchCta).toBe(false);
+    expect(en['chat.runError.title.cloudAccountRequired']).toBe('Cloud account not connected');
+    expect(zhCN['chat.runError.title.cloudAccountRequired']).toBe('云账户未接入');
+    expect(zhTW['chat.runError.title.cloudAccountRequired']).toBe('雲端帳戶未連接');
+    expect(th['chat.runError.cloudAccountRequiredMessage']).toContain('BYOK');
+    for (const dict of [en, zhCN, zhTW, th]) {
+      expect(dict['chat.runError.cloudAccountRequiredMessage']).not.toBe('');
+    }
+  });
+
+  it('keeps an unbound pending project under the local stub when the list view changes', () => {
+    const local = localWorkspaceContext();
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: undefined }, local)).toBe(true);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: null } as never, local)).toBe(true);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: 'local' }, local)).toBe(true);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: 'ws-team' }, local)).toBe(false);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: undefined }, null)).toBe(true);
+    const team = { ...local, workspaceId: 'ws-team', workspaceType: 'team' as const };
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: undefined }, team)).toBe(false);
+    expect(pendingProjectBelongsToWorkspace({ workspaceId: 'ws-team' }, team)).toBe(true);
+  });
+
+  it('does not pin automations to the local stub', () => {
+    const local = localWorkspaceContext();
+    expect(automationWorkspaceScopeFor(local)).toBeNull();
+    const team = { ...local, workspaceId: 'ws-team', workspaceType: 'team' as const, workspaceMemberId: 'm1' };
+    expect(automationWorkspaceScopeFor(team)).toEqual({ workspaceId: 'ws-team', workspaceMemberId: 'm1' });
+    // A `local` scope stored by an older build is cleared, not kept.
+    const stale = { workspaceId: 'local', workspaceMemberId: 'local' };
+    expect(orbitWorkspaceScopePatch(local, stale)).toEqual({ workspaceScope: null });
+    expect(orbitWorkspaceScopePatch(null, stale)).toEqual({ workspaceScope: stale });
+    const config = { orbit: { enabled: true, time: '09:00', workspaceScope: stale } } as never;
+    expect(configForManualOrbitRun(config, local).orbit?.workspaceScope ?? null).toBeNull();
   });
 });

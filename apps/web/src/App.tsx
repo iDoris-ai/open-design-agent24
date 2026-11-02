@@ -71,6 +71,7 @@ import type { ShareLoginReturn } from './components/share/share-login-return';
 import { SignedOutObservedShare } from './components/share/SignedOutObservedShare';
 import { projectsForWorkspaceChrome } from './runtime/workspace-chrome-projects';
 import { isCloudAccountEnabled } from './identity/IdentityBridge';
+import { pendingProjectBelongsToWorkspace } from './state/projects';
 import { AmrArtifactUpgradeGate } from './components/AmrArtifactUpgradeGate';
 import { AmrArtifactUpgradeHomeCard } from './components/AmrArtifactUpgradeHomeCard';
 import { ExperienceSurvey } from './components/ExperienceSurvey';
@@ -1551,11 +1552,7 @@ function AppInner() {
       : projects.filter((project) =>
           pendingLocalProjectScopeRef.current === currentPendingLocalProjectScope
           && pendingLocalProjectIdsRef.current.has(project.id)
-          && (
-            workspaceContext === null
-              ? project.workspaceId == null
-              : project.workspaceId === workspaceContext.workspaceId
-          ));
+          && pendingProjectBelongsToWorkspace(project, workspaceContext));
     projectListScopeRef.current = currentProjectListScope;
     projectDisplayKeyRef.current = currentProjectDisplayKey;
     if (snapshot) {

@@ -28,6 +28,22 @@ export function workspaceProjectHeaders(context: WorkspaceCollabContext): Header
 }
 
 /**
+ * The Workspace an automation (Orbit, routine "new project per run") should
+ * pin its projects to. The local single-user stub is not a Workspace, so it
+ * yields null: storing `local` would bind every automation project to it and
+ * hide them from the unscoped project list.
+ */
+export function automationWorkspaceScopeFor(
+  context: WorkspaceCollabContext | null | undefined,
+): { workspaceId: string; workspaceMemberId: string } | null {
+  if (!context || isLocalSingleUserContext(context)) return null;
+  return {
+    workspaceId: context.workspaceId,
+    workspaceMemberId: context.workspaceMemberId,
+  };
+}
+
+/**
  * Browser-owned navigations (iframe/img/a) cannot attach request headers.
  * Preserve the exact authority in the URL for those surfaces; the daemon
  * freshly verifies both values before serving Workspace-owned bytes.

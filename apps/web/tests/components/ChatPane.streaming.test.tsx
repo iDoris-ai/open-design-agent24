@@ -9,6 +9,22 @@ import { ChatPane, buildRunErrorDiagnosticText, retryableAssistantMessage } from
 import { DESIGN_SYSTEM_WORKSPACE_PROMPT_PREFIX } from '../../src/design-system-auto-prompt';
 import { readExpandedIndexCss } from '../helpers/read-expanded-css';
 import type { ChatMessage, Conversation, ProjectMetadata } from '../../src/types';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/IdentityBridge';
+
+// The switch-to-Cloud CTA only exists with a connected cloud account (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount({
+    id: 'cloud-test',
+    displayName: 'Cloud Test',
+    cloud: EnabledCloudAccount,
+  });
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const composerMocks = vi.hoisted(() => ({
   focus: vi.fn(),

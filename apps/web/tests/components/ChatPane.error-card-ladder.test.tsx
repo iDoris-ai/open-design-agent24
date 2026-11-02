@@ -14,6 +14,22 @@ import {
   GENERIC_DAEMON_DISCONNECT_MESSAGE,
 } from '../../src/providers/daemon';
 import type { AppConfig, ChatMessage } from '../../src/types';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/IdentityBridge';
+
+// The switch-to-Cloud CTA only exists with a connected cloud account (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount({
+    id: 'cloud-test',
+    displayName: 'Cloud Test',
+    cloud: EnabledCloudAccount,
+  });
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const translate = (key: string, vars?: Record<string, string | number>) => {
   if (vars && Object.keys(vars).length > 0) {
