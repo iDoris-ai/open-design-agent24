@@ -15,6 +15,10 @@ const heroLogotypeSvg = read('../../public/logo-03.svg');
 // (see home-hero/pixel-scan/engine.ts), which samples this SVG's alpha
 // channel as the glyph mask it assembles out of coloured blocks.
 const heroPixelScanSvg = read('../../public/logo-scan.svg');
+const configSource = read('../../src/state/config.ts');
+const homeHeroCss = read('../../src/styles/home/home-hero.css');
+const mascotComponentSource = read('../../src/components/home-hero/IDorisMascot.tsx');
+const mascotSvg = (state: string) => read(`../../public/idoris-mascot/${state}.svg`);
 
 // The current OpenDesign brand glyph is the ink superellipse tile introduced
 // with the landing-page rebrand (landing PR #3444): its outline starts with
@@ -61,5 +65,32 @@ describe('Home logo assets', () => {
     // brand mark at all; what still matters is that it never falls back to the
     // retired raster app icon.
     expect(entryNavRailSource).not.toContain('src="/app-icon.svg"');
+  });
+
+  it('points the Agent24 home mascot at the pixel iDoris poses', () => {
+    for (const state of ['idle', 'thinking', 'success', 'error'] as const) {
+      const svg = mascotSvg(state);
+      expect(svg).toContain(`id="idoris-state-${state}"`);
+      expect(svg).toContain('id="idoris-outline"');
+      expect(svg).toContain('shape-rendering="crispEdges"');
+      expect(svg).toContain('viewBox="0 0 48 66"');
+      expect(svg).toContain('apps/desktop/src/renderer/assets/logo-welcome.png');
+    }
+    expect(homeHeroSource).toContain('<RotatingTitleWord');
+    expect(homeHeroSource).toContain('isAgent24Shell()');
+    expect(homeHeroSource).toContain('<IDorisMascot state="idle" />');
+    expect(mascotComponentSource).toContain("state === 'idle' ? ' home-hero__idoris-mascot--breathe'");
+    expect(mascotComponentSource).toContain("idle: '/idoris-mascot/idle.svg'");
+    expect(mascotComponentSource).toContain("thinking: '/idoris-mascot/thinking.svg'");
+    expect(mascotComponentSource).toContain("success: '/idoris-mascot/success.svg'");
+    expect(mascotComponentSource).toContain("error: '/idoris-mascot/error.svg'");
+    expect(homeHeroCss).toContain('image-rendering: pixelated');
+    expect(homeHeroCss).toContain('width: 72px');
+    expect(homeHeroCss).toMatch(
+      /@media \(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.home-hero__idoris-mascot\s*\{[^}]*animation:\s*none/,
+    );
+    expect(configSource).toMatch(
+      /export const DEFAULT_PET: PetConfig = \{\s*adopted: false,\s*enabled: false,/,
+    );
   });
 });
