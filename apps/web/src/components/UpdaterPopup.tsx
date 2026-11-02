@@ -25,6 +25,7 @@ import {
   trackUpdateInstallResult,
   trackUpdatePromptSurfaceView,
 } from '../analytics/events';
+import { isAgent24Shell } from '../runtime/agent24-shell';
 import styles from './UpdaterPopup.module.css';
 
 /** Rocket badge from the update visual language, on the ready indicator. */
@@ -111,7 +112,20 @@ function restartSafetyText(t: Translator, safety: UpdaterRestartSafety): string 
     : t('updater.activeRunsUnknownBody');
 }
 
-export function UpdaterPopup({
+/**
+ * Agent24 never mounts the Open Design update-ready indicator.
+ *
+ * The body subscribes to the host updater and reads its status on mount.
+ * In Agent24, OD upgrades ship by changing the pin, so this control must
+ * not render and must not touch the updater. EntryShell and App both mount
+ * it; the check lives here so both sites stay quiet without editing them.
+ */
+export function UpdaterPopup(props: UpdaterPopupProps) {
+  if (isAgent24Shell()) return null;
+  return <UpdaterPopupBody {...props} />;
+}
+
+function UpdaterPopupBody({
   allowSilentUpdates,
   silentUpdatePreferenceReady = false,
   onAllowSilentUpdatesChange,
