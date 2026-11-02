@@ -17,6 +17,7 @@ import { defaultMediaExecutionPolicy, mediaPolicyDenial } from '../media/policy.
 import { formatMediaTaskDiagnostic } from '../media/diagnostics.js';
 import { findMediaModel, type MediaModel } from '../media/models.js';
 import { fetchVelaVideoModels } from '../media/vela.js';
+import { isCloudAccountEnabled } from '../identity/cloud-account.js';
 import type { CloudVideoModelsResponse } from '@open-design/contracts';
 import type { ImageGenerationRequestSummary } from '../media/image-generation-retry.js';
 import type { RouteDeps } from '../server-context.js';
@@ -685,6 +686,9 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
   };
   app.get('/api/media/models', async (req, res) => {
     if (req.query.cloud === 'true') {
+      if (!isCloudAccountEnabled()) {
+        return sendApiError(res, 503, 'MEDIA_CATALOG_UNAVAILABLE', 'Open Design cloud media is not available: the cloud account is not connected.');
+      }
       if (!isLocalSameOrigin(req, getResolvedPort())) return res.status(403).json({ error: 'cross-origin request rejected' });
       const grant = optionalToolGrantFromRequest(req, { operation: 'media:generate' });
       const projectId = grant?.projectId ?? (typeof req.query.projectId === 'string' ? req.query.projectId : '');

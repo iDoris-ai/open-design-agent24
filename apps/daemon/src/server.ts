@@ -907,9 +907,13 @@ import {
   disabledCollabPresenceHandle,
   disabledCollabSyncHandle,
   disabledVelaRoutesLifecycle,
+  CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE,
+  LOCAL_USER_DISPLAY_NAME,
   installCloudAccount,
   isCloudAccountEnabled,
+  isCloudOnlyAgentId,
   mountDisabledCloudAccountRoutes,
+  suspendCloudTransportEnv,
   readCloudWorkspaceDirectory,
   type CloudAccount,
 } from './identity/cloud-account.js';
@@ -3218,10 +3222,15 @@ export async function startServer(options: StartServerOptions = {}) {
   const restoreCloudAccount = options.cloudAccount
     ? installCloudAccount(options.cloudAccount)
     : undefined;
+  // Decided once, after the account is installed: with the cloud account
+  // disabled, OD_WORKSPACE_CONTEXT_SOURCE=vela / OD_COLLAB_TRANSPORT=vela-cli
+  // and friends are ignored for the life of this server.
+  const restoreCloudTransportEnv = suspendCloudTransportEnv();
   let cloudAccountReleased = false;
   const releaseCloudAccount = () => {
     if (cloudAccountReleased) return;
     cloudAccountReleased = true;
+    restoreCloudTransportEnv();
     restoreCloudAccount?.();
   };
   try {
@@ -9370,6 +9379,7 @@ async function startServerNow({
     },
     resolveWorkspaceContext: resolveProjectCommentWorkspaceContext,
     resolveCurrentAuthorDisplayName: () => {
+      if (!isCloudAccountEnabled()) return LOCAL_USER_DISPLAY_NAME;
       const user = readVelaControlApiContext(process.env, configuredAmrEnv())?.user;
       return user?.name?.trim() || user?.email?.trim() || null;
     },
@@ -11623,6 +11633,12 @@ async function startServerNow({
     // Single choke point for the codex transport switch. Every other
     // agent — and codex with the switch off — gets back the identical
     // registry object, so nothing below can tell this call happened.
+    // The one run-start gate for the cloud-only agent: chat, CLI/MCP,
+    // automations, and same-run retries all enter here. Detection hides AMR,
+    // but an old session or a scripted caller can still name it, and it would
+    // spend the user's Open Design credits through ~/.amr.
+    if (!isCloudAccountEnabled() && isCloudOnlyAgentId(agentId))
+      return failRun('AGENT_UNAVAILABLE', CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE);
     const def = applyCodexTransportOverride(getAgentDef(agentId));
     if (!def)
       return failRun(

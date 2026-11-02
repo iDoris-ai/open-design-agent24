@@ -17,6 +17,11 @@
 // contracts so Settings and daemon-side checks reject the same hosts.
 
 import { spawn } from 'node:child_process';
+import {
+  CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE,
+  isCloudAccountEnabled,
+  isCloudOnlyAgentId,
+} from './identity/cloud-account.js';
 import { promises as dnsPromises, lookup as dnsLookupCb } from 'node:dns';
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
@@ -2330,6 +2335,17 @@ async function testAgentConnectionInternal(
     typeof input.model === 'string' && input.model.trim()
       ? input.model.trim()
       : 'default';
+  if (!isCloudAccountEnabled() && isCloudOnlyAgentId(input.agentId)) {
+    return {
+      ok: false,
+      kind: 'agent_not_installed',
+      latencyMs: Date.now() - start,
+      model,
+      agentName: input.agentId,
+      detail: CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE,
+      diagnostics: { phase: 'binary_resolution' },
+    };
+  }
   const def = getAgentDef(input.agentId);
   if (!def) {
     return {

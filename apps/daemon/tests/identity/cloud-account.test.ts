@@ -17,7 +17,9 @@ import {
   isDisabledCloudAccountPath,
   mountDisabledCloudAccountRoutes,
   readCloudWorkspaceDirectory,
+  suspendCloudTransportEnv,
 } from '../../src/identity/cloud-account.js';
+import { readRunTelemetrySinkConfig } from '../../src/langfuse-trace.js';
 
 const CLOUD_HOST = /amr-api\.open-design\.ai|amr-link\.open-design\.ai|open-design\.ai\/(?:cloud|amr)(?:\/|$|\?)/;
 
@@ -100,6 +102,60 @@ describe('DisabledCloudAccount', () => {
   });
 });
 
+describe('DisabledCloudAccount gates', () => {
+  it('ignores the cloud transport env switches and logs once', () => {
+    const env: NodeJS.ProcessEnv = {
+      OD_WORKSPACE_CONTEXT_SOURCE: 'vela',
+      OD_COLLAB_TRANSPORT: 'vela-cli',
+      OD_DATA_DIR: '/tmp/keep',
+    };
+    const log = vi.fn();
+    const restore = suspendCloudTransportEnv(env, log);
+    expect(env.OD_WORKSPACE_CONTEXT_SOURCE).toBeUndefined();
+    expect(env.OD_COLLAB_TRANSPORT).toBeUndefined();
+    expect(env.OD_DATA_DIR).toBe('/tmp/keep');
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]![0]).toContain('OD_WORKSPACE_CONTEXT_SOURCE, OD_COLLAB_TRANSPORT');
+    restore();
+    expect(env.OD_WORKSPACE_CONTEXT_SOURCE).toBe('vela');
+    expect(env.OD_COLLAB_TRANSPORT).toBe('vela-cli');
+
+    const silent = vi.fn();
+    suspendCloudTransportEnv({ OD_DATA_DIR: '/tmp/keep' }, silent)();
+    expect(silent).not.toHaveBeenCalled();
+
+    const restoreAccount = installCloudAccount(EnabledCloudAccount);
+    try {
+      const enabledEnv: NodeJS.ProcessEnv = { OD_WORKSPACE_CONTEXT_SOURCE: 'vela' };
+      suspendCloudTransportEnv(enabledEnv, log);
+      expect(enabledEnv.OD_WORKSPACE_CONTEXT_SOURCE).toBe('vela');
+    } finally {
+      restoreAccount();
+    }
+  });
+
+  it('never selects the Vela telemetry sink with a stored control key', () => {
+    const env: NodeJS.ProcessEnv = {
+      VELA_CONTROL_KEY: 'ck_stray_upstream_key',
+      HOME: '/nonexistent-odx3-home',
+      OPEN_DESIGN_TELEMETRY_RELAY_URL: 'https://telemetry-relay.example.test',
+    };
+    const disabled = readRunTelemetrySinkConfig(env, {});
+    expect(disabled?.kind).toBe('relay');
+    expect(JSON.stringify(disabled)).not.toContain('ck_stray_upstream_key');
+    expect(JSON.stringify(disabled)).not.toContain('amr-api');
+
+    const noRelay = { ...env };
+    delete noRelay.OPEN_DESIGN_TELEMETRY_RELAY_URL;
+    const none = readRunTelemetrySinkConfig(noRelay, {});
+    expect(none === null || none.kind !== 'vela').toBe(true);
+
+    // Same inputs with the cloud account connected still pick Vela.
+    const enabled = readRunTelemetrySinkConfig(env, {}, EnabledCloudAccount);
+    expect(enabled?.kind).toBe('vela');
+  });
+});
+
 describe('startServer under DisabledCloudAccount', () => {
   const calls: string[] = [];
   let server: http.Server;
@@ -108,6 +164,7 @@ describe('startServer under DisabledCloudAccount', () => {
   const savedEnv = {
     OD_DATA_DIR: process.env.OD_DATA_DIR,
     OD_WORKSPACE_CONTEXT_SOURCE: process.env.OD_WORKSPACE_CONTEXT_SOURCE,
+    OD_COLLAB_TRANSPORT: process.env.OD_COLLAB_TRANSPORT,
     OD_COLLAB_CLOUD_URL: process.env.OD_COLLAB_CLOUD_URL,
     VELA_CONTROL_KEY: process.env.VELA_CONTROL_KEY,
     VELA_API_URL: process.env.VELA_API_URL,
@@ -120,7 +177,9 @@ describe('startServer under DisabledCloudAccount', () => {
   beforeAll(async () => {
     dataDir = await mkdtemp(path.join(tmpdir(), 'odx3-cloud-account-'));
     process.env.OD_DATA_DIR = dataDir;
-    delete process.env.OD_WORKSPACE_CONTEXT_SOURCE;
+    // A packaged `prod` profile sets these; the disabled account ignores them.
+    process.env.OD_WORKSPACE_CONTEXT_SOURCE = 'vela';
+    process.env.OD_COLLAB_TRANSPORT = 'vela-cli';
     delete process.env.OD_COLLAB_CLOUD_URL;
     delete process.env.VELA_CONTROL_KEY;
     delete process.env.VELA_API_URL;
@@ -170,6 +229,57 @@ describe('startServer under DisabledCloudAccount', () => {
     expect(activeCloudAccount()).toEqual(DisabledCloudAccount);
     expect(isCloudAccountEnabled()).toBe(false);
   });
+
+  it('ignores OD_WORKSPACE_CONTEXT_SOURCE=vela and OD_COLLAB_TRANSPORT=vela-cli', () => {
+    expect(process.env.OD_WORKSPACE_CONTEXT_SOURCE).toBeUndefined();
+    expect(process.env.OD_COLLAB_TRANSPORT).toBeUndefined();
+  });
+
+  it('keeps a project created with local-stub workspace headers in the list after reload', async () => {
+    const id = `odx3-list-${Date.now()}`;
+    const localHeaders = {
+      'x-od-workspace-id': 'local',
+      'x-od-workspace-type': 'personal',
+      'x-od-workspace-member-id': 'local',
+      'x-od-workspace-role': 'owner',
+      'x-od-workspace-lifecycle-state': 'active',
+      'x-od-workspace-member-status': 'active',
+      'x-od-workspace-can-share-projects': 'false',
+      'x-od-workspace-can-write-synced-files': 'false',
+    };
+    const created = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...localHeaders },
+      body: JSON.stringify({ id, name: 'stays listed', skillId: null, designSystemId: null }),
+    });
+    expect(created.status).toBe(200);
+    // A fresh list read, as the web does after a refresh.
+    const listed = await fetch(`${baseUrl}/api/projects`);
+    expect(listed.status).toBe(200);
+    const { projects } = (await listed.json()) as { projects: Array<{ id: string }> };
+    expect(projects.map((project) => project.id)).toContain(id);
+    const detail = await fetch(`${baseUrl}/api/projects/${id}`);
+    expect(detail.status).toBe(200);
+  }, 60_000);
+
+  it('answers the cloud media catalogue as unavailable', async () => {
+    const response = await fetch(`${baseUrl}/api/media/models?cloud=true&projectId=p1`);
+    expect(response.status).toBe(503);
+    const payload = (await response.json()) as { error?: { code?: string; message?: string } };
+    expect(payload.error?.code).toBe('MEDIA_CATALOG_UNAVAILABLE');
+    expect(payload.error?.message).toContain('cloud account is not connected');
+  });
+
+  it('refuses the AMR cloud agent at run start', async () => {
+    const response = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentId: 'amr', message: 'hello' }),
+    });
+    const body = await response.text();
+    expect(body).toContain('AGENT_UNAVAILABLE');
+    expect(body).toContain('cloud account is not connected');
+  }, 60_000);
 
   it('creates a personal project without calling a cloud origin', async () => {
     const before = calls.length;

@@ -4,6 +4,18 @@ import {
   createdProjectWorkspaceHome,
   localProjectWorkspaceAttribution,
 } from '../../src/collab/created-project-workspace.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/cloud-account.js';
+
+// Workspace binding on project creation is cloud-account behaviour (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const ACTIVE_HEADERS: Record<string, string> = {
   'x-od-workspace-id': 'workspace-a',
@@ -117,5 +129,26 @@ describe('createdProjectWorkspaceHome', () => {
     await expect(createdProjectWorkspaceHome(
       request({ 'x-od-workspace-id': 'workspace-a' }),
     )).resolves.toBeNull();
+  });
+});
+
+describe('localProjectWorkspaceAttribution under DisabledCloudAccount', () => {
+  it('drops the claimed workspace so the project stays a plain local project', async () => {
+    const { DisabledCloudAccount } = await import('../../src/identity/cloud-account.js');
+    const restore = installCloudAccount(DisabledCloudAccount);
+    try {
+      expect(localProjectWorkspaceAttribution(request())).toBeNull();
+      expect(
+        localProjectWorkspaceAttribution(request({
+          ...ACTIVE_HEADERS,
+          'x-od-workspace-id': 'local',
+          'x-od-workspace-type': 'personal',
+          'x-od-workspace-member-id': 'local',
+        })),
+      ).toBeNull();
+      await expect(createdProjectWorkspaceHome(request())).resolves.toBeNull();
+    } finally {
+      restore();
+    }
   });
 });

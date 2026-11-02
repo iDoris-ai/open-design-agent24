@@ -130,3 +130,66 @@ export function readCloudWorkspaceDirectory<T extends { ok: boolean; items: read
   if (!isCloudAccountEnabled()) return Promise.resolve({ ok: true, items: [] });
   return read();
 }
+
+/**
+ * Display name for the one local user. Mirrors `LocalSingleUser.displayName`
+ * in `apps/web/src/identity/IdentityBridge.ts`.
+ */
+export const LOCAL_USER_DISPLAY_NAME = 'iDoris';
+
+/**
+ * Agents that only run against the Open Design cloud (AMR bills the user's
+ * OD account through `~/.amr` credentials). Detection already hides them;
+ * this is the run-start refusal for callers that name one directly.
+ */
+export function isCloudOnlyAgentId(agentId: unknown): boolean {
+  return agentId === 'amr';
+}
+
+export const CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE =
+  'The Open Design cloud agent (AMR) is not available: this installation uses a local user and the cloud account is not connected. Pick a local agent or a BYOK provider.';
+
+/**
+ * Env switches that point the daemon at the Vela / collab cloud plane. A
+ * packaged `prod` profile sets some of them (`apps/packaged/src/workspace-team.ts`).
+ * With the cloud account disabled they would select providers whose directory
+ * is the empty stub, so every workspace request would 403.
+ */
+export const CLOUD_TRANSPORT_ENV_KEYS = [
+  'OD_WORKSPACE_CONTEXT_SOURCE',
+  'OD_COLLAB_TRANSPORT',
+  'OD_TEAM_PROJECTS_TRANSPORT',
+  'OD_RESOURCE_TRANSPORT',
+  'OD_COLLAB_CLOUD_URL',
+] as const;
+
+/**
+ * Remove the cloud transport switches from `env` for as long as the daemon
+ * runs with the cloud account disabled. Every reader (server wiring, collab
+ * helpers, spawned agents) then sees them unset. Logs once per call when any
+ * was set. Returns a restore that puts back only keys nobody re-set since.
+ * A no-op while the cloud account is enabled.
+ */
+export function suspendCloudTransportEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  log: (message: string) => void = (message) => console.warn(message),
+): () => void {
+  if (isCloudAccountEnabled()) return () => {};
+  const removed: Array<[string, string]> = [];
+  for (const key of CLOUD_TRANSPORT_ENV_KEYS) {
+    const value = env[key];
+    if (value === undefined) continue;
+    removed.push([key, value]);
+    delete env[key];
+  }
+  if (removed.length > 0) {
+    log(
+      `[od] cloud account disabled; ignoring ${removed.map(([key]) => key).join(', ')}`,
+    );
+  }
+  return () => {
+    for (const [key, value] of removed) {
+      if (env[key] === undefined) env[key] = value;
+    }
+  };
+}

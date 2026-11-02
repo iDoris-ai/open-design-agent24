@@ -16,6 +16,18 @@ vi.mock('../../src/integrations/vela-command.js', async (importOriginal) => {
 });
 
 import { generateMedia } from '../../src/media/index.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/cloud-account.js';
+
+// These cases render Vela cloud media, which DisabledCloudAccount refuses (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const IMAGE_BYTES = Buffer.from('real-image-output');
 const VIDEO_BYTES = Buffer.from('real-video-output');

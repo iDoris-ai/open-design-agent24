@@ -6,6 +6,18 @@ import path from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { enqueueObjectEvidence, evidenceStore, inheritFrozenAttachments, drainEvidence, reconcileTaskObjectReasons } from '../../src/services/evidence-delivery.js';
 import type { ReportContext } from '../../src/langfuse-trace.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/cloud-account.js';
+
+// These cases exercise the Vela telemetry sink, which DisabledCloudAccount never selects (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const context = (runId: string, projectId = 'project', conversationId = 'conversation'): ReportContext => ({
   projectId, conversationId, installationId: null, prefs: { metrics: true, content: true, artifactManifest: true },
