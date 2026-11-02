@@ -1,6 +1,7 @@
-import { createServer, type Server } from 'node:http';
+import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { readFileSync } from 'node:fs';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import vm from 'node:vm';
 
@@ -11,8 +12,11 @@ import {
   isAgent24HeadlessNamespace,
   rewriteAgent24ShellDocument,
 } from '../sidecar/agent24-shell';
-import { proxyHttpRequest } from '../sidecar/server';
-import { isAgent24Shell } from '../src/runtime/agent24-shell';
+import { AGENT24_SHELL_HTML_BUFFER_LIMIT_BYTES, proxyHttpRequest } from '../sidecar/server';
+import {
+  AGENT24_HEADLESS_NAMESPACE as runtimeAgent24Namespace,
+  isAgent24Shell,
+} from '../src/runtime/agent24-shell';
 
 const servers: Server[] = [];
 
@@ -39,20 +43,69 @@ async function listen(server: Server): Promise<string> {
   return `http://127.0.0.1:${address.port}`;
 }
 
+function exportedConstString(source: string, name: string): string {
+  const match = new RegExp(`export const ${name} = ['"]([^'"]+)['"]`).exec(source);
+  if (match?.[1] == null) throw new Error(`source is missing export const ${name}`);
+  return match[1];
+}
+
+function rawRequest(
+  origin: string,
+  init: { method?: string; headers?: IncomingHttpHeaders; path?: string; timeoutMs?: number } = {},
+): Promise<{ status: number; headers: IncomingHttpHeaders; body: Buffer }> {
+  const url = new URL(init.path ?? '/', origin);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({
+      hostname: url.hostname,
+      port: url.port,
+      path: `${url.pathname}${url.search}`,
+      method: init.method ?? 'GET',
+      headers: init.headers,
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => resolve({
+        status: res.statusCode ?? 0,
+        headers: res.headers,
+        body: Buffer.concat(chunks),
+      }));
+      res.on('error', reject);
+    });
+    req.setTimeout(init.timeoutMs ?? 2000, () => req.destroy(new Error('proxy hung')));
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function startShellProxy(upstreamOrigin: string, agent24Shell: boolean): Promise<string> {
+  return await listen(createServer((request, response) => {
+    const target = new URL(request.url ?? '/', upstreamOrigin);
+    void proxyHttpRequest(target, request, response, { agent24Shell }).catch((error: unknown) => {
+      if (response.headersSent || response.writableEnded || response.destroyed) return;
+      response.statusCode = 500;
+      response.end(error instanceof Error ? error.message : String(error));
+    });
+  }));
+}
+
 describe('agent24 shell flag', () => {
   it('matches the namespace agent24-headless stamps onto the web sidecar', () => {
     const packaged = readFileSync(
       new URL('../../packaged/src/agent24-headless.ts', import.meta.url),
       'utf8',
     );
+    const sidecarSource = readFileSync(new URL('../sidecar/agent24-shell.ts', import.meta.url), 'utf8');
+    const runtimeSource = readFileSync(new URL('../src/runtime/agent24-shell.ts', import.meta.url), 'utf8');
     const sidecarIndex = readFileSync(new URL('../sidecar/index.ts', import.meta.url), 'utf8');
-    expect(packaged).toContain(
-      `export const AGENT24_HEADLESS_NAMESPACE = "${AGENT24_HEADLESS_NAMESPACE}";`,
-    );
+    const packagedNamespace = exportedConstString(packaged, 'AGENT24_HEADLESS_NAMESPACE');
+    expect(exportedConstString(sidecarSource, 'AGENT24_HEADLESS_NAMESPACE')).toBe(packagedNamespace);
+    expect(exportedConstString(runtimeSource, 'AGENT24_HEADLESS_NAMESPACE')).toBe(packagedNamespace);
+    expect(AGENT24_HEADLESS_NAMESPACE).toBe(packagedNamespace);
+    expect(runtimeAgent24Namespace).toBe(packagedNamespace);
     expect(packaged).toContain('namespace: AGENT24_HEADLESS_NAMESPACE');
     expect(packaged).toContain('webOutputMode: "standalone"');
     expect(sidecarIndex).toContain('namespace: client.stamp.namespace');
-    expect(isAgent24HeadlessNamespace(AGENT24_HEADLESS_NAMESPACE)).toBe(true);
+    expect(isAgent24HeadlessNamespace(packagedNamespace)).toBe(true);
     expect(isAgent24HeadlessNamespace('default')).toBe(false);
     expect(isAgent24HeadlessNamespace('headless')).toBe(false);
     expect(isAgent24HeadlessNamespace('agent24-creative-extra')).toBe(false);
@@ -88,6 +141,11 @@ describe('agent24 shell flag', () => {
       accept: 'text/html',
       pathname: '/_next/static/app.js',
     })).toBe(false);
+    expect(isAgent24DocumentRequest({
+      method: 'HEAD',
+      accept: 'text/html',
+      pathname: '/',
+    })).toBe(false);
 
     const html = Buffer.from('<html><head></head><body>x</body></html>');
     const rewritten = rewriteAgent24ShellDocument({ 'content-type': 'text/html; charset=utf-8' }, html);
@@ -98,6 +156,14 @@ describe('agent24 shell flag', () => {
       html,
     )).toBeNull();
     expect(rewriteAgent24ShellDocument({ 'content-type': 'application/javascript' }, html)).toBeNull();
+    expect(rewriteAgent24ShellDocument(
+      { 'content-type': 'text/html', etag: '"page"', 'content-length': '4321' },
+      html,
+      304,
+    )).toBeNull();
+    expect(rewriteAgent24ShellDocument({ 'content-type': 'text/html' }, html, 204)).toBeNull();
+    expect(rewriteAgent24ShellDocument({ 'content-type': 'text/html' }, html, 100)).toBeNull();
+    expect(rewriteAgent24ShellDocument({ 'content-type': 'text/html' }, Buffer.alloc(0), 200)).toBeNull();
   });
 
   it('injects the boot script through the document proxy only for the agent24 shell', async () => {
@@ -138,6 +204,169 @@ describe('agent24 shell flag', () => {
     expect(seenEncoding[0] ?? '').not.toMatch(/gzip/i);
     expect(seenEncoding[1]).toMatch(/gzip/i);
   });
+
+  it('forwards 304, 204, HEAD, and an empty document without a boot script', async () => {
+    const page = '<!doctype html><html><head></head><body>shell</body></html>';
+    const upstreamOrigin = await listen(createServer((request, response) => {
+      if (request.method === 'HEAD') {
+        response.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-length': Buffer.byteLength(page),
+          etag: '"page"',
+        });
+        response.end();
+        return;
+      }
+      if (request.url === '/not-modified') {
+        response.writeHead(304, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-length': String(Buffer.byteLength(page)),
+          etag: '"page"',
+        });
+        response.end();
+        return;
+      }
+      if (request.url === '/empty') {
+        response.writeHead(204, { 'content-type': 'text/html; charset=utf-8', etag: '"empty"' });
+        response.end();
+        return;
+      }
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-length': '0',
+      });
+      response.end();
+    }));
+    const origin = await startShellProxy(upstreamOrigin, true);
+
+    const notModified = await rawRequest(origin, {
+      path: '/not-modified',
+      headers: { accept: 'text/html', 'if-none-match': '"page"' },
+    });
+    expect(notModified.status).toBe(304);
+    expect(notModified.body.length).toBe(0);
+    expect(notModified.headers.etag).toBe('"page"');
+    expect(notModified.headers['content-length']).toBe(String(Buffer.byteLength(page)));
+
+    const noContent = await rawRequest(origin, {
+      path: '/empty',
+      headers: { accept: 'text/html' },
+    });
+    expect(noContent.status).toBe(204);
+    expect(noContent.body.length).toBe(0);
+
+    const head = await rawRequest(origin, {
+      method: 'HEAD',
+      headers: { accept: 'text/html' },
+    });
+    expect(head.status).toBe(200);
+    expect(head.body.length).toBe(0);
+    expect(head.headers['content-length']).toBe(String(Buffer.byteLength(page)));
+
+    const blank = await rawRequest(origin, { headers: { accept: 'text/html' } });
+    expect(blank.status).toBe(200);
+    expect(blank.body.length).toBe(0);
+    expect(blank.headers['content-length']).toBe('0');
+  });
+
+  it('passes a gzip document through byte for byte', async () => {
+    const html = Buffer.from('<!doctype html><html><head></head><body>gzipped</body></html>');
+    const gzipped = gzipSync(html);
+    const upstreamOrigin = await listen(createServer((_request, response) => {
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-encoding': 'gzip',
+        'content-length': gzipped.length,
+      });
+      response.end(gzipped);
+    }));
+    const origin = await startShellProxy(upstreamOrigin, true);
+    const result = await rawRequest(origin, {
+      headers: { accept: 'text/html', 'accept-encoding': 'gzip' },
+    });
+    expect(result.status).toBe(200);
+    expect(result.headers['content-encoding']).toBe('gzip');
+    expect(result.body.equals(gzipped)).toBe(true);
+    expect(gunzipSync(result.body).toString('utf8')).not.toContain('data-od-agent24-shell');
+  });
+
+  it('returns 502 when the upstream document closes before end', async () => {
+    const upstreamOrigin = await listen(createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.write('<html><head></head><body>partial', () => {
+        // Let the proxy read the headers and enter the buffer path first.
+        // Destroying in this turn RSTs unread bytes and never starts it.
+        setTimeout(() => response.socket?.destroy(), 50);
+      });
+    }));
+    const origin = await startShellProxy(upstreamOrigin, true);
+    const result = await rawRequest(origin, { headers: { accept: 'text/html' } });
+    expect(result.status).toBe(502);
+    expect(result.body.toString('utf8')).toBe('upstream document failed');
+  });
+
+  it('destroys the upstream request when the client closes mid-document', async () => {
+    let releaseUpstream!: () => void;
+    const upstreamReady = new Promise<void>((resolve) => {
+      releaseUpstream = resolve;
+    });
+    let dropped = false;
+    const upstreamOrigin = await listen(createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.write('<html><head></head><body>');
+      response.on('close', () => {
+        if (!response.writableFinished) dropped = true;
+      });
+      releaseUpstream();
+    }));
+    let proxySettled = false;
+    const origin = await listen(createServer((request, response) => {
+      const target = new URL(request.url ?? '/', upstreamOrigin);
+      void proxyHttpRequest(target, request, response, { agent24Shell: true }).finally(() => {
+        proxySettled = true;
+      });
+    }));
+    const url = new URL(origin);
+    await new Promise<void>((resolve, reject) => {
+      const client = httpRequest({
+        hostname: url.hostname,
+        port: url.port,
+        path: '/',
+        method: 'GET',
+        headers: { accept: 'text/html' },
+      });
+      client.on('error', () => undefined);
+      client.end();
+      void upstreamReady.then(() => {
+        client.destroy();
+        resolve();
+      }).catch(reject);
+    });
+    const deadline = Date.now() + 1500;
+    while ((!dropped || !proxySettled) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(dropped).toBe(true);
+    expect(proxySettled).toBe(true);
+  });
+
+  it('streams a document past the rewrite buffer without injecting', async () => {
+    const page = Buffer.alloc(AGENT24_SHELL_HTML_BUFFER_LIMIT_BYTES + 128, 0x61);
+    page.write('<html><head></head><body>');
+    const upstreamOrigin = await listen(createServer((_request, response) => {
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-length': page.length,
+      });
+      response.end(page);
+    }));
+    const origin = await startShellProxy(upstreamOrigin, true);
+    const result = await rawRequest(origin, { headers: { accept: 'text/html' }, timeoutMs: 15_000 });
+    expect(result.status).toBe(200);
+    expect(result.headers['content-length']).toBe(String(page.length));
+    expect(result.body.equals(page)).toBe(true);
+    expect(result.body.includes(Buffer.from('data-od-agent24-shell'))).toBe(false);
+  }, 20_000);
 
   it('leaves the update dialog and design-files GitHub links in place', () => {
     const updateDialog = readFileSync(

@@ -42,10 +42,21 @@ function headerValue(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value.join(",") : value ?? "";
 }
 
+/**
+ * 1xx, 204, and 304 must not grow a message body. A prerendered page's
+ * conditional GET is a real 304 whose Content-Length describes the selected
+ * representation, not a payload we are allowed to replace.
+ */
+export function agent24ShellStatusOmitsBody(statusCode: number): boolean {
+  return statusCode < 200 || statusCode === 204 || statusCode === 304;
+}
+
 export function rewriteAgent24ShellDocument(
   headers: IncomingHttpHeaders,
   body: Buffer,
+  statusCode = 200,
 ): { headers: IncomingHttpHeaders; body: Buffer } | null {
+  if (agent24ShellStatusOmitsBody(statusCode) || body.length === 0) return null;
   const type = headerValue(headers["content-type"]).toLowerCase();
   if (!type.includes("text/html")) return null;
   const encoding = headerValue(headers["content-encoding"]).trim().toLowerCase();
