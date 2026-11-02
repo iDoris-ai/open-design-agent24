@@ -86,6 +86,7 @@ describe('DisabledCloudAccount', () => {
 describe('startServer under DisabledCloudAccount', () => {
   const calls: string[] = [];
   let server: http.Server;
+  let shutdown: (() => Promise<void>) | undefined;
   let baseUrl: string;
   const savedEnv = {
     OD_DATA_DIR: process.env.OD_DATA_DIR,
@@ -124,13 +125,19 @@ describe('startServer under DisabledCloudAccount', () => {
     const started = (await startServer({ port: 0, returnServer: true })) as {
       url: string;
       server: http.Server;
+      shutdown?: () => Promise<void>;
     };
     baseUrl = started.url;
     server = started.server;
+    shutdown = started.shutdown;
   }, 120_000);
 
   afterAll(async () => {
-    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+    await shutdown?.().catch(() => undefined);
+    if (server) {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
     globalThis.fetch = originalFetch;
     https.request = originalHttpsRequest;
     http.request = originalHttpRequest;
@@ -138,7 +145,8 @@ describe('startServer under DisabledCloudAccount', () => {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    if (dataDir) await rm(dataDir, { recursive: true, force: true });
+    // Shutdown still flushes diagnostics after the HTTP server emits close.
+    if (dataDir) await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('creates a personal project without calling a cloud origin', async () => {
