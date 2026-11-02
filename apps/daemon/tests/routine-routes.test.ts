@@ -15,6 +15,18 @@ import {
   openDatabase,
 } from '../src/db.js';
 import { registerRoutineRoutes } from '../src/routes/routine.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../src/identity/cloud-account.js';
+
+// Routine Workspace scope and cloud stock search are cloud-account behaviour (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 describe('routine routes', () => {
   let tempDir: string;

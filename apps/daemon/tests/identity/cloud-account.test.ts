@@ -20,6 +20,10 @@ import {
   suspendCloudTransportEnv,
 } from '../../src/identity/cloud-account.js';
 import { readRunTelemetrySinkConfig } from '../../src/langfuse-trace.js';
+import {
+  bindProjectToPersistedAutomationWorkspace,
+  normalizePersistedAutomationWorkspaceScope,
+} from '../../src/automations/workspace-scope.js';
 
 const CLOUD_HOST = /amr-api\.open-design\.ai|amr-link\.open-design\.ai|open-design\.ai\/(?:cloud|amr)(?:\/|$|\?)/;
 
@@ -156,6 +160,24 @@ describe('DisabledCloudAccount gates', () => {
   });
 });
 
+describe('automation Workspace scope under DisabledCloudAccount', () => {
+  it('ignores a stored scope and never binds the automation project', () => {
+    const scope = { workspaceId: 'local', workspaceMemberId: 'local' };
+    expect(normalizePersistedAutomationWorkspaceScope(scope)).toBeNull();
+    const ensure = vi.fn();
+    bindProjectToPersistedAutomationWorkspace(ensure, scope, 'p1', 1);
+    expect(ensure).not.toHaveBeenCalled();
+    const restore = installCloudAccount(EnabledCloudAccount);
+    try {
+      expect(normalizePersistedAutomationWorkspaceScope(scope)).toEqual(scope);
+      bindProjectToPersistedAutomationWorkspace(ensure, scope, 'p1', 1);
+      expect(ensure).toHaveBeenCalledTimes(1);
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe('startServer under DisabledCloudAccount', () => {
   const calls: string[] = [];
   let server: http.Server;
@@ -262,6 +284,55 @@ describe('startServer under DisabledCloudAccount', () => {
     expect(detail.status).toBe(200);
   }, 60_000);
 
+  it('keeps an Orbit project created under a stored local-stub scope in the list', async () => {
+    const localScope = { workspaceId: 'local', workspaceMemberId: 'local' };
+    const saved = await fetch(`${baseUrl}/api/app-config`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'x-od-workspace-id': 'local',
+        'x-od-workspace-member-id': 'local',
+      },
+      body: JSON.stringify({
+        agentId: 'claude',
+        orbit: { enabled: false, time: '09:00', workspaceScope: localScope },
+      }),
+    });
+    expect(saved.status).toBe(200);
+    const started = await fetch(`${baseUrl}/api/orbit/run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(started.status).toBe(200);
+    const { projectId } = (await started.json()) as { projectId?: string };
+    expect(projectId).toMatch(/^orbit-/);
+    const listed = await fetch(`${baseUrl}/api/projects`);
+    const { projects } = (await listed.json()) as { projects: Array<{ id: string }> };
+    expect(projects.map((project) => project.id)).toContain(projectId);
+  }, 60_000);
+
+  it('answers stock image search as unavailable without calling the cloud', async () => {
+    const before = calls.length;
+    const id = `odx3-stock-${Date.now()}`;
+    const created = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, name: 'stock', skillId: null, designSystemId: null }),
+    });
+    expect(created.status).toBe(200);
+    const response = await fetch(`${baseUrl}/api/projects/${id}/media/stock-search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ slots: [{ id: 'hero', query: 'eyeglasses', width: 1200 }] }),
+    });
+    expect(response.status).toBe(503);
+    const payload = (await response.json()) as { error?: { code?: string; message?: string } };
+    expect(payload.error?.code).toBe('STOCK_SEARCH_UNAVAILABLE');
+    expect(payload.error?.message).toContain('cloud account');
+    expect(calls.slice(before).filter((url) => CLOUD_HOST.test(url))).toEqual([]);
+  }, 60_000);
+
   it('answers the cloud media catalogue as unavailable', async () => {
     const response = await fetch(`${baseUrl}/api/media/models?cloud=true&projectId=p1`);
     expect(response.status).toBe(503);
@@ -277,7 +348,8 @@ describe('startServer under DisabledCloudAccount', () => {
       body: JSON.stringify({ agentId: 'amr', message: 'hello' }),
     });
     const body = await response.text();
-    expect(body).toContain('AGENT_UNAVAILABLE');
+    expect(body).toContain('CLOUD_ACCOUNT_REQUIRED');
+    expect(body).not.toContain('AGENT_UNAVAILABLE');
     expect(body).toContain('cloud account is not connected');
   }, 60_000);
 

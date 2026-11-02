@@ -4101,8 +4101,9 @@ async function startServerNow({
     // A completely headerless local/signed-out request is the explicit legacy
     // lane: built-ins plus unclaimed local resources, and new resources remain
     // unbound. A half-specified identity is never that lane and is rejected by
-    // the verifier below.
-    if (claimed === null) return null;
+    // the verifier below. With the cloud account disabled every request is
+    // that lane: there is no Workspace for a design system to belong to.
+    if (claimed === null || !cloudAccountEnabled) return null;
     const verified = await verifyExplicitWorkspaceRequestContext({ req });
     if (!verified.ok) {
       throw Object.assign(new Error(verified.message), {
@@ -11638,7 +11639,7 @@ async function startServerNow({
     // but an old session or a scripted caller can still name it, and it would
     // spend the user's Open Design credits through ~/.amr.
     if (!isCloudAccountEnabled() && isCloudOnlyAgentId(agentId))
-      return failRun('AGENT_UNAVAILABLE', CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE);
+      return failRun('CLOUD_ACCOUNT_REQUIRED', CLOUD_ONLY_AGENT_UNAVAILABLE_MESSAGE);
     const def = applyCodexTransportOverride(getAgentDef(agentId));
     if (!def)
       return failRun(

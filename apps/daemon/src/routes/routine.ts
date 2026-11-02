@@ -26,6 +26,7 @@ import {
   AutomationWorkspaceScopeError,
   normalizePersistedAutomationWorkspaceScope,
 } from '../automations/workspace-scope.js';
+import { isCloudAccountEnabled } from '../identity/cloud-account.js';
 import type { PathDeps, RouteDeps } from '../server-context.js';
 
 export interface RegisterRoutineRoutesDeps extends RouteDeps<'db' | 'routines'> {
@@ -62,7 +63,9 @@ function normalizeRoutineContext(value: unknown) {
   const workspaceScope = hasWorkspaceScope
     ? normalizePersistedAutomationWorkspaceScope(input.workspaceScope)
     : null;
-  if (hasWorkspaceScope && input.workspaceScope !== null && !workspaceScope) {
+  // With the cloud account disabled the parser drops every scope on purpose;
+  // a stale stored/sent scope is ignored, not a malformed request.
+  if (hasWorkspaceScope && input.workspaceScope !== null && !workspaceScope && isCloudAccountEnabled()) {
     throw new Error(
       'context.workspaceScope must contain workspaceId and workspaceMemberId',
     );
