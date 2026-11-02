@@ -74,6 +74,7 @@ import { useI18n, useT } from '../i18n';
 import { isCloudAccountEnabled } from '../identity/IdentityBridge';
 import { LocalAccountNotice } from '../identity/LocalAccountNotice';
 import { navigate, useRoute } from '../router';
+import { isAgent24Shell, onboardingEntryRoute } from '../runtime/agent24-onboarding';
 import type {
   AgentInfo,
   ApiProtocol,
@@ -728,13 +729,16 @@ export function EntryShell({
     );
   useEffect(() => {
     if (!isCloudAccountEnabled()) return;
+    // Agent24 replaces /onboarding with Home. Sending a signed-out Cloud
+    // session back here would loop with that replacement.
+    if (isAgent24Shell()) return;
     // The entry shell is an authenticated surface. Both an explicit signed-out
     // status and a definitive credential rejection return to the existing
     // Cloud identity gate. Passive reauthentication preserves the saved model
     // source and Home's locally persisted, not-yet-sent draft.
     const selectedCloudIdentityRejected = usesOpenDesignCloud && amrLoggedIn === false;
     if ((!selectedCloudIdentityRejected && !amrAuthRequired) || view === 'onboarding') return;
-    navigate({ kind: 'home', view: 'onboarding' }, { replace: true });
+    navigate(onboardingEntryRoute(), { replace: true });
   }, [amrAuthRequired, amrLoggedIn, usesOpenDesignCloud, view]);
   let accountFooterNotice: ReactNode = null;
   if (cloudAccountEnabled && accountFooterState === 'syncing') {
@@ -1490,7 +1494,7 @@ export function EntryShell({
   // when the brief cannot be routed reliably.
   async function handlePluginLoopSubmit(payload: PluginLoopSubmit) {
     if (amrAuthRequired) {
-      navigate({ kind: 'home', view: 'onboarding' }, { replace: true });
+      navigate(onboardingEntryRoute(), { replace: true });
       return 'blocked' as const;
     }
     const createInput = pluginLoopCreateInput(payload);
@@ -1661,7 +1665,7 @@ export function EntryShell({
         error instanceof ProjectCreateError
         && error.code === 'AMR_AUTH_REQUIRED'
       ) {
-        navigate({ kind: 'home', view: 'onboarding' }, { replace: true });
+        navigate(onboardingEntryRoute(), { replace: true });
         return 'blocked' as const;
       }
       throw error;
@@ -1933,7 +1937,7 @@ export function EntryShell({
           balanceUsd={workspaceBalanceUsd}
           onOpenSettings={onOpenSettings}
           onInvite={() => changeView('members')}
-          onSignInCloud={() => navigate({ kind: 'home', view: 'onboarding' })}
+          onSignInCloud={() => navigate(onboardingEntryRoute())}
           onSignedOut={onSignedOut}
           updaterSlot={updaterSlot}
           // A loading or unavailable workspace read is not proof of sign-out.

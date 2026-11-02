@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildPersistedConfig,
@@ -74,11 +74,29 @@ const baseConfig: AppConfig = {
 };
 
 describe('shouldRouteToFirstRunOnboarding', () => {
+  afterEach(() => {
+    delete (globalThis as { __OD_IS_AGENT24__?: boolean }).__OD_IS_AGENT24__;
+  });
+
   it('never hijacks an explicit project deep link while daemon config is hydrating', () => {
     const unfinished = { ...baseConfig, onboardingCompleted: false };
 
     expect(shouldRouteToFirstRunOnboarding(unfinished, '/projects/project-a')).toBe(false);
     expect(shouldRouteToFirstRunOnboarding(unfinished, '/')).toBe(true);
+    expect(shouldRouteToFirstRunOnboarding(unfinished, '/onboarding')).toBe(true);
+    expect(shouldRouteToFirstRunOnboarding(
+      { ...unfinished, onboardingCompleted: true },
+      '/',
+    )).toBe(false);
+  });
+
+  it('does not send an Agent24 shell into first-run onboarding', () => {
+    (globalThis as { __OD_IS_AGENT24__?: boolean }).__OD_IS_AGENT24__ = true;
+    const unfinished = { ...baseConfig, onboardingCompleted: false };
+
+    expect(shouldRouteToFirstRunOnboarding(unfinished, '/')).toBe(false);
+    expect(shouldRouteToFirstRunOnboarding(unfinished, '/onboarding')).toBe(false);
+    expect(shouldRouteToFirstRunOnboarding(unfinished, '/projects/project-a')).toBe(false);
   });
 });
 
