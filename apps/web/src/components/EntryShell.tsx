@@ -71,6 +71,8 @@ import type {
 } from '@open-design/contracts/analytics';
 import { agentIdToTracking } from '@open-design/contracts/analytics';
 import { useI18n, useT } from '../i18n';
+import { isCloudAccountEnabled } from '../identity/IdentityBridge';
+import { LocalAccountNotice } from '../identity/LocalAccountNotice';
 import { navigate, useRoute } from '../router';
 import type {
   AgentInfo,
@@ -712,10 +714,11 @@ export function EntryShell({
     amrLoggedIn,
     amrSessionState,
   );
-  const railWorkspaceContext = accountFooterState === 'sign-in'
+  const cloudAccountEnabled = isCloudAccountEnabled();
+  const railWorkspaceContext = !cloudAccountEnabled || accountFooterState === 'sign-in'
     ? null
     : workspaceContext;
-  const usesOpenDesignCloud = config.mode === 'daemon' && config.agentId === 'amr';
+  const usesOpenDesignCloud = cloudAccountEnabled && config.mode === 'daemon' && config.agentId === 'amr';
   const amrProfile = config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE ?? null;
   const amrAuthRequired =
     workspaceContextState.failure === 'reauth-required'
@@ -724,6 +727,7 @@ export function EntryShell({
       && requiresAmrReauthentication(amrSessionState, workspaceContextState.failure)
     );
   useEffect(() => {
+    if (!isCloudAccountEnabled()) return;
     // The entry shell is an authenticated surface. Both an explicit signed-out
     // status and a definitive credential rejection return to the existing
     // Cloud identity gate. Passive reauthentication preserves the saved model
@@ -733,11 +737,11 @@ export function EntryShell({
     navigate({ kind: 'home', view: 'onboarding' }, { replace: true });
   }, [amrAuthRequired, amrLoggedIn, usesOpenDesignCloud, view]);
   let accountFooterNotice: ReactNode = null;
-  if (accountFooterState === 'syncing') {
+  if (cloudAccountEnabled && accountFooterState === 'syncing') {
     accountFooterNotice = <RailAccountSyncTip />;
-  } else if (accountFooterState === 'recovering') {
+  } else if (cloudAccountEnabled && accountFooterState === 'recovering') {
     accountFooterNotice = <RailAccountRecoveryTip />;
-  } else if (accountFooterState === 'sign-in') {
+  } else if (cloudAccountEnabled && accountFooterState === 'sign-in') {
     accountFooterNotice = <CloudSignInTip />;
   }
   const workspaceContextRef = useRef(workspaceContext);
@@ -3694,6 +3698,65 @@ function OnboardingView({
   }, [runtime, runtimeValidationConsumable]);
 
   const primaryActionLabel = t('settings.onboardingContinue');
+
+  // This fork has no Open Design cloud account. The first onboarding step is
+  // the local CLI / BYOK choice. Hosted sign-in and the free-credits badge
+  // stay in the tree for the enabled branch below.
+  if (step === 0 && !isCloudAccountEnabled()) {
+    return (
+      <section
+        className="onboarding-view onboarding-view--cloud"
+        aria-label={t('settings.welcomeTitle')}
+        data-testid="onboarding-local-account"
+      >
+        <div className="onboarding-cloud__pane">
+          <div className="onboarding-cloud__center">
+            <h1 className="onboarding-cloud__title">{t('settings.onboardingLocalTitle')}</h1>
+            <p className="onboarding-cloud__body">{t('settings.onboardingLocalBody')}</p>
+            <LocalAccountNotice />
+            <div className={`onboarding-cloud__alts ${onboardingWelcomeStyles.options}`}>
+              <Button
+                variant="subtle"
+                className="onboarding-cloud__alt-btn"
+                onClick={() => {
+                  emitOnboardingClick('local_coding_agent', 'select_runtime', {
+                    runtime_type: 'local_cli',
+                  });
+                  setRuntime('local');
+                  void scanCliAgents({ preferExisting: true });
+                  setStep(2);
+                }}
+              >
+                <Icon name="robot" size={16} />
+                {t('settings.onboardingLocalAi')}
+              </Button>
+              <Button
+                variant="subtle"
+                className="onboarding-cloud__alt-btn"
+                onClick={() => {
+                  emitOnboardingClick('byok', 'select_runtime', { runtime_type: 'byok' });
+                  setRuntime('byok');
+                  setStep(2);
+                }}
+              >
+                <Icon name="key" size={16} />
+                {t('settings.onboardingApiKey')}
+              </Button>
+            </div>
+          </div>
+          <footer className="onboarding-cloud__footer">
+            <LanguageMenu placement="up" align="start" />
+            <span>
+              © {new Date().getFullYear()} OpenDesign · {t('settings.onboardingCloudRights')}
+            </span>
+          </footer>
+        </div>
+        <div className="onboarding-cloud__art" aria-hidden="true">
+          <img src="/onboarding/onboarding-cloud-art.webp" alt="" />
+        </div>
+      </section>
+    );
+  }
 
   // Cloud remains the primary identity path. Local CLI and BYOK are independent
   // direct setup paths; authenticated users keep the full source chooser.

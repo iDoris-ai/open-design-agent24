@@ -67,6 +67,7 @@ import { notifyAmrLoginStatusChanged } from './amrLoginPolling';
 import { Icon } from './Icon';
 import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useGithubStars';
 import { isAgent24Shell } from '../runtime/agent24-shell';
+import { isCloudAccountEnabled } from '../identity/IdentityBridge';
 import { PlanWordmark, planBadgeTierForWorkspace } from './PlanWordmark';
 import { MarqueeLabel } from './MarqueeLabel';
 import { RemixIcon } from './RemixIcon';
@@ -1954,10 +1955,11 @@ export function WorkspaceTopRightAccountCluster({
     deepSeekCampaignAudience === 'unknown'
       ? null
       : deepSeekCampaignAudience;
+  const shownContext = isCloudAccountEnabled() ? context : null;
   return (
     <EntryTopRightCluster
       page="project"
-      context={context}
+      context={shownContext}
       billing={billing}
       billingResponse={billingResponse}
       balanceUsd={balanceUsd}
@@ -2216,6 +2218,7 @@ export function EntryNavRail({
         : [];
 
   async function loadWorkspaceDirectory(options: { force?: boolean } = {}) {
+    if (!isCloudAccountEnabled()) return;
     // Capture the identity this read is FOR, and compare against `contextRef`
     // (not the closed-over `context`, which is by definition the identity we are
     // reading for) before committing anything — see `beginWorkspaceScopedRead`.
@@ -2374,10 +2377,15 @@ export function EntryNavRail({
       },
     },
     {
-      workspaceContext: context,
-      onActive: () => {
-        void loadWorkspaceDirectory({ force: true });
-      },
+      workspaceContext: isCloudAccountEnabled() ? context : null,
+      enabled: isCloudAccountEnabled(),
+      ...(isCloudAccountEnabled()
+        ? {
+            onActive: () => {
+              void loadWorkspaceDirectory({ force: true });
+            },
+          }
+        : {}),
     },
   );
 

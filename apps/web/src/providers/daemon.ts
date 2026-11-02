@@ -61,6 +61,7 @@ import { workspaceProjectHeaders } from '../state/projects';
 import { setRuntimeAmrConsoleOrigin } from '../runtime/amr-guidance';
 import { canRetainSuccessfulRunForBlockedStrategy } from '../runtime/blocked-strategy-result';
 import { coalescedGet } from '../lib/coalesced-get';
+import { isCloudAccountEnabled } from '../identity/IdentityBridge';
 import { currentWorkspaceAccountGeneration } from '../collab/workspace-identity';
 
 /**
@@ -1377,6 +1378,9 @@ export interface VelaLoginStatusRead {
 export function readVelaLoginStatus(
   options: { refresh?: boolean } = {},
 ): Promise<VelaLoginStatusRead> {
+  if (!isCloudAccountEnabled()) {
+    return Promise.resolve({ ok: false, httpStatus: 404, body: null });
+  }
   const query = options.refresh ? '?refresh=1' : '';
   const url = `/api/integrations/vela/status${query}`;
   const accountGeneration = currentWorkspaceAccountGeneration();
@@ -1410,6 +1414,7 @@ export async function fetchVelaLoginStatus(options: { refresh?: boolean } = {}):
 }
 
 export async function fetchAmrWalletSnapshot(options: { refresh?: boolean } = {}): Promise<AmrWalletSnapshot | null> {
+  if (!isCloudAccountEnabled()) return null;
   try {
     const query = options.refresh ? '?refresh=1' : '';
     const resp = await fetch(`/api/integrations/vela/wallet${query}`, { cache: 'no-store' });
@@ -1421,6 +1426,7 @@ export async function fetchAmrWalletSnapshot(options: { refresh?: boolean } = {}
 }
 
 export async function fetchAmrModels(): Promise<AmrModelsResponse | null> {
+  if (!isCloudAccountEnabled()) return null;
   try {
     const resp = await fetch('/api/amr/models', { cache: 'no-store' });
     if (!resp.ok) return null;
@@ -1447,6 +1453,9 @@ export async function startVelaLogin(
   odDeviceId?: string | null,
   authAttemptId?: string,
 ): Promise<StartVelaLoginResult> {
+  if (!isCloudAccountEnabled()) {
+    return { ok: false, status: 404, error: 'cloud-account-disabled' };
+  }
   try {
     const loginAttribution =
       attribution && odDeviceId ? { ...attribution, odDeviceId } : attribution;
@@ -1495,6 +1504,7 @@ export async function startVelaLogin(
 export async function cancelVelaLogin(
   authAttemptId?: string,
 ): Promise<{ ok: boolean; canceled?: boolean }> {
+  if (!isCloudAccountEnabled()) return { ok: false };
   const hasTarget = authAttemptId !== undefined;
   const canonicalAuthAttemptId = authAttemptId
     && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(authAttemptId)
@@ -1528,6 +1538,7 @@ export async function cancelVelaLogin(
 }
 
 export async function velaLogout(): Promise<{ ok: boolean }> {
+  if (!isCloudAccountEnabled()) return { ok: false };
   try {
     const resp = await fetch('/api/integrations/vela/logout', { method: 'POST' });
     return { ok: resp.ok };

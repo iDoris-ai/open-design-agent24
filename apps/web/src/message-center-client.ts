@@ -1,3 +1,5 @@
+import { isCloudAccountEnabled } from './identity/IdentityBridge';
+
 export type MessageCenterFilter = 'all' | 'unread' | 'read';
 
 export interface MessageCenterMessage {
@@ -110,6 +112,7 @@ export function clearAnonymousState(storage: Storage): void {
  * authoritative: there is no runtime, so there is no account.
  */
 export async function isAmrLoggedIn(): Promise<boolean> {
+  if (!isCloudAccountEnabled()) return false;
   const response = await fetch('/api/integrations/vela/status', { cache: 'no-store' });
   if (response.status === 503) {
     const payload = (await response.clone().json().catch(() => null)) as { error?: string } | null;
@@ -125,6 +128,7 @@ export async function pullMessageCenter(input: {
   loggedIn: boolean;
   filter?: MessageCenterFilter;
 }): Promise<MessageCenterMessage[]> {
+  if (!isCloudAccountEnabled()) return [];
   const messages: MessageCenterMessage[] = [];
   let cursor: string | null = null;
   let pages = 0;
@@ -156,6 +160,7 @@ export async function pullMessageCenter(input: {
 }
 
 export async function markAccountMessageRead(messageId: string): Promise<void> {
+  if (!isCloudAccountEnabled()) return;
   const response = await fetch(`${ACCOUNT_PROXY}/messages/${encodeURIComponent(messageId)}/read`, { method: 'POST' });
   if (!response.ok) throw new Error(`Mark message read failed: ${response.status}`);
 }

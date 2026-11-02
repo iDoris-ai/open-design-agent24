@@ -39,6 +39,9 @@ import {
   trackSettingsView,
 } from '../analytics/events';
 import { LOCALE_LABEL, LOCALES, useI18n } from '../i18n';
+import { isCloudAccountEnabled } from '../identity/IdentityBridge';
+import { LocalAccountNotice } from '../identity/LocalAccountNotice';
+import { localAccountSentence, localAccountTitle } from '../identity/local-account-copy';
 import type { Locale } from '../i18n';
 import type { Dict } from '../i18n/types';
 import { AgentIcon } from './AgentIcon';
@@ -222,6 +225,7 @@ import {
 } from '../utils/notifications';
 
 export type SettingsSection =
+  | 'account'
   | 'general'
   | 'labs'
   | 'execution'
@@ -3902,6 +3906,7 @@ export function SettingsDialog({
   // BYOK content so "Local CLI" only renders once (in the seg-control tab),
   // not twice (heading + tab).
   const sectionHeader: Record<SettingsSection, { title: string; subtitle: string }> = {
+    account: { title: localAccountTitle(locale), subtitle: localAccountSentence(locale) },
     general: { title: t('settings.general'), subtitle: t('settings.generalHint') },
     labs: { title: t('labs.title'), subtitle: t('labs.navHint') },
     execution: { title: t('settings.title'), subtitle: t('settings.subtitle') },
@@ -4375,6 +4380,18 @@ export function SettingsDialog({
             ) : null}
             <button
               type="button"
+              className={`settings-nav-item${activeSection === 'account' ? ' active' : ''}`}
+              onClick={() => setActiveSection('account')}
+              data-testid="settings-nav-account"
+            >
+              <Icon name="users" size={18} />
+              <span>
+                <strong>{localAccountTitle(locale)}</strong>
+                <small>{localAccountSentence(locale)}</small>
+              </span>
+            </button>
+            <button
+              type="button"
               className={`settings-nav-item${activeSection === 'execution' ? ' active' : ''}`}
               onClick={() => setActiveSection('execution')}
               data-testid="settings-nav-execution"
@@ -4475,6 +4492,11 @@ export function SettingsDialog({
             </button>
           </aside>
           <div className="settings-content" ref={settingsContentRef}>
+          {activeSection === 'account' ? (
+            <section className="settings-section">
+              <LocalAccountNotice />
+            </section>
+          ) : null}
           {activeSection === 'execution' ? (
             <>
               {/* Sticky shell: the 本机 CLI / API 提供商 switch stays pinned
@@ -4527,7 +4549,7 @@ export function SettingsDialog({
                 </button>
               </div>
               </div>
-              {cfg.mode === 'daemon' && !amrCardSignedIn ? (
+              {isCloudAccountEnabled() && cfg.mode === 'daemon' && !amrCardSignedIn ? (
                 // Only prompt to sign into OpenDesign Cloud when NOT already
                 // signed in — the AMR/vela session IS the cloud identity (one
                 // session drives both), so a logged-in user has nothing to do
@@ -5000,7 +5022,7 @@ export function SettingsDialog({
                                       ) : null}
                                   </div>
                                 </button>
-                                {isAmrAgent ? (
+                                {isCloudAccountEnabled() && isAmrAgent ? (
                                   active && amrCardStatusReady ? (
                                     <span
                                       className={

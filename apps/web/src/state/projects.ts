@@ -7,6 +7,7 @@
 // result changes behavior must preserve failure as a typed error instead.
 
 import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
+import { isLocalSingleUserContext } from '../identity/IdentityBridge';
 import { isDaemonProxyConnectionFailure } from '../runtime/daemon-proxy-failure';
 import { BackoffController, type BackoffOptions } from '../lib/backoff';
 import { markProjectCreatedByViewer } from '../collab/useProjectCollab';
@@ -277,7 +278,10 @@ export async function listProjects(options?: {
   workspaceView?: WorkspaceProjectListView;
 }): Promise<Project[]> {
   const context = options?.workspaceContext ?? null;
-  if (context) {
+  // The local single-user stub is not a cloud workspace. Listing it through
+  // `/api/workspaces/:id/projects` would ask the daemon to authorize an id
+  // that has no directory. Personal projects stay on `/api/projects`.
+  if (context && !isLocalSingleUserContext(context)) {
     const summaries = await listWorkspaceProjectSummaries({
       context,
       workspaceView: options?.workspaceView,

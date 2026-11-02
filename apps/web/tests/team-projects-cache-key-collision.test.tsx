@@ -103,7 +103,9 @@ describe('team-projects coalescing key is shape-safe across call sites', () => {
     });
 
     expect(Array.isArray(result.current.projects)).toBe(true);
-    expect(result.current.projects.map((project) => project.projectId)).toEqual(['p-shared']);
+    // The shell context is the local personal stub, so this mount does not
+    // adopt the project page's team catalog. It must still be an array.
+    expect(result.current.projects).toEqual([]);
   });
 
   it('projectIsSharedWithWorkspace() still answers correctly when home primed the shared cache first', async () => {

@@ -10,6 +10,7 @@ import {
   type OnboardingProfile,
 } from '../state/onboarding-profile';
 import { trackAmrEntryClick } from './events';
+import { isCloudAccountEnabled } from '../identity/IdentityBridge';
 
 type Track = (
   event: string,
@@ -309,6 +310,7 @@ function readReusableAmrAttribution(
 async function mirrorAmrEntryToAmrAnalytics(
   attribution: AmrEntryAttribution,
 ): Promise<void> {
+  if (!isCloudAccountEnabled()) return;
   if (typeof fetch !== 'function') return;
   const sourcePageName = ENTRY_PAGE_BY_SOURCE[attribution.sourceDetail];
   try {
@@ -351,6 +353,7 @@ async function mirrorAmrOnboardingProfileToAmrAnalytics(
   attribution: AmrEntryAttribution,
   now: Date,
 ): Promise<void> {
+  if (!isCloudAccountEnabled()) return;
   if (typeof fetch !== 'function') return;
   try {
     await fetch('/api/integrations/vela/analytics-profile', {

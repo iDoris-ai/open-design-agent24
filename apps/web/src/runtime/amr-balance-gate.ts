@@ -5,6 +5,7 @@ import type {
   WorkspaceBillingPreflight,
 } from '@open-design/contracts';
 import { fetchAmrWalletSnapshot } from '../providers/daemon';
+import { isCloudAccountEnabled } from '../identity/IdentityBridge';
 
 // Wallet balance is display data, not proof that a run cannot be funded.
 // Coding Plan, free models and automatic recharge are decided by Link.
@@ -239,6 +240,7 @@ async function fetchWorkspaceWalletSnapshot(
 export async function fetchAmrBalanceCardWalletSnapshot(
   scope?: AmrBalanceGateScope,
 ): Promise<AmrWalletSnapshot | null> {
+  if (!isCloudAccountEnabled()) return null;
   if (!scope) {
     // `refresh` forces one upstream read: the failure event carries no balance,
     // and a cache that predates the run's own spending would under-report it.
@@ -266,6 +268,7 @@ export async function checkAmrBalanceGate(
   _scope?: AmrBalanceGateScope,
   _modelId?: string | null,
 ): Promise<AmrBalanceGateResult> {
+  if (!isCloudAccountEnabled()) return { kind: 'allow' };
   try {
     const cached = await fetchAmrWalletSnapshot().catch(() => null);
     if (cached?.status === 'signed_out') {
@@ -284,6 +287,7 @@ export async function hasAmrFundingRecovered(
   scope?: AmrBalanceGateScope,
   modelId?: string | null,
 ): Promise<boolean> {
+  if (!isCloudAccountEnabled()) return false;
   if (!scope) {
     const snapshot = await fetchAmrWalletSnapshot({ refresh: true }).catch(() => null);
     return Boolean(

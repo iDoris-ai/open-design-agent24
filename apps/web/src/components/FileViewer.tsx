@@ -7,6 +7,8 @@ import { useExperienceError } from '../observability/use-experience-error';
 import { daemonErrorCodeProp, failureDetailProps } from '../analytics/failure-detail';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
+import { isCloudAccountEnabled } from '../identity/IdentityBridge';
+import { LocalShareUnavailableNotice } from '../identity/LocalAccountNotice';
 import { useSharePlan } from './share/useSharePlan';
 import { boundedPublishProgress, ShareTab, type SharePublishFailureKey } from './share/ShareTab';
 import type { ObservedPublicShareLink, ObservedShareUpdateRequest } from './share/observed-public-share-link';
@@ -7964,7 +7966,7 @@ function HtmlViewer({
 
   const sharePlanState = useSharePlan({
     projectId, filePath: file.name, workspaceContext,
-    enabled: deployMenuOpen && unifiedActionTab === 'share' && canPublishPublic
+    enabled: isCloudAccountEnabled() && deployMenuOpen && unifiedActionTab === 'share' && canPublishPublic
       && !viewerOnly && workspaceActive && fileShareStatus !== 'stopped',
     contentKey: JSON.stringify([file.mtime, file.size, liveHtml ?? source,
       streaming, viewerOnly, workspaceActive, canPublishPublic, fileShareStatus]),
@@ -15688,6 +15690,7 @@ function HtmlViewer({
   // Preview memory policy does not determine publication eligibility. The share
   // plan and POST validate the original file, never the routing-only preview.
   const rawCanShare = isShareableArtifact;
+  const cloudShareEnabled = isCloudAccountEnabled();
   const shareGuideAppUserId = useShareGuideAppUserId();
   const projectShareHistoryState = useProjectShareHistoryState(projectId, workspaceContext, JSON.stringify([file.name, publishedFileSlug, publishedFileUrl]));
   const projectShareHistory = projectShareHistoryState.history;
@@ -15926,7 +15929,7 @@ function HtmlViewer({
     setMenuAnchorId(null);
     setMenuOrigin('toolbar');
     setDeployMenuOpen((v) => {
-      const nextTab = tab === 'share' && !rawCanShare ? 'export' : tab;
+      const nextTab = tab === 'share' && !rawCanShare && cloudShareEnabled ? 'export' : tab;
       setUnifiedActionTab(nextTab);
       /*
        * 「再点一次 = 关掉」只在**同一条路、同一个页签**上成立。
@@ -17710,8 +17713,8 @@ function HtmlViewer({
                     aria-expanded={deployMenuOpen && unifiedActionTab === 'share'}
                     data-artifact-anchor={toolbarMenuAnchorId}
                     aria-label={shareMenuLabel}
-                    disabled={viewerOnly || !rawCanShare}
-                    title={viewerOnly ? viewerOnlyDisabledTitle : !rawCanShare || streaming ? shareUnavailableHint : undefined}
+                    disabled={viewerOnly || (cloudShareEnabled && !rawCanShare)}
+                    title={viewerOnly ? viewerOnlyDisabledTitle : cloudShareEnabled && (!rawCanShare || streaming) ? shareUnavailableHint : undefined}
                     onClick={openShareMenu}
                   >
                     {/* Owner C0: share the artifact card's forward-arrow glyph. */}
@@ -17750,7 +17753,7 @@ function HtmlViewer({
                       }}
                     />
                   ) : null}
-                {deployMenuOpen && (rawCanShare || rawCanDownload) ? (
+                {deployMenuOpen && (rawCanShare || rawCanDownload || !cloudShareEnabled) ? (
                   /*
                     * **同一块菜单,只是可能换个地方开。**
                     *
@@ -17786,7 +17789,10 @@ function HtmlViewer({
                         : undefined
                     }
                   >
-                    {unifiedActionTab === 'share' && rawCanShare ? (
+                    {unifiedActionTab === 'share' && !cloudShareEnabled ? (
+                      <LocalShareUnavailableNotice />
+                    ) : null}
+                    {unifiedActionTab === 'share' && cloudShareEnabled && rawCanShare ? (
                       <>
                       <SharePanelHeader
                         title={t('fileViewer.unifiedShareTab')}
