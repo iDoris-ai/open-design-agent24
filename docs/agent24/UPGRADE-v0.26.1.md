@@ -189,3 +189,5 @@ headless 协议仍是 2。`resourceSafeBase` 仍是配置字段，由 Agent24 �
 - 没有实测「v0.26.1 的 Windows 打包缓存命中 schema 7 后，因缺少启动器被 `invalidate()` 丢掉」。
 - daemon 在 `tests/runtimes` 和 `server-paths` 之外的测试没有跑。
 - 当前 Agent24 树上没有找到计划里的 `open-design-mac-release.mjs`。
+
+下一次升级上游，按 [PATCHES.md](./PATCHES.md) 逐条复核。ODX-1 只覆盖启动器和运行时，后面的 ODX 补丁不在本文件的提交表里。
