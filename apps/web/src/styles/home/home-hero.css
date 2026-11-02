@@ -173,6 +173,52 @@
 .home-hero__title--optical-trim {
   margin-right: -0.55em;
 }
+/* Agent24 only: the pixel iDoris sits in the headline, and the sentence
+   stays one flex item so the rotating noun does not pick up the gap.
+   Upstream (no --with-mascot) keeps the plain centered h1. */
+.home-hero__title--with-mascot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-12);
+  max-width: 100%;
+}
+.home-hero__title-text {
+  min-width: 0;
+}
+/* 72px wide. The SVG is a 48×66 cell grid; height is 99px so the aspect
+   stays exact. `pixelated` keeps that scale from smoothing the cells.
+   The dark-ground edge is painted in the SVG (`#idoris-outline`, white at
+   0.7 opacity), matching preview-dark.png. It is not a CSS plate, so a
+   light ground stays as clean as preview-light.png. */
+.home-hero__idoris-mascot {
+  flex: none;
+  width: 72px;
+  height: auto;
+  aspect-ratio: 48 / 66;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.home-hero__idoris-mascot--breathe {
+  animation: idoris-mascot-breathe 3.2s ease-in-out infinite;
+}
+@keyframes idoris-mascot-breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-hero__idoris-mascot {
+    animation: none;
+    transform: none;
+  }
+}
 /* Quiet second line under the headline: same 14px grey the rest of the page's
    secondary text uses. Carries the old title → composer gap (20px). */
 .home-hero__subtitle {

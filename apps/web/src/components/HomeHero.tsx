@@ -57,7 +57,9 @@ import {
   type HomeHeroChip,
 } from './home-hero/chips';
 import { homeHeroChipLabel } from './home-hero/chip-labels';
+import { IDorisMascot } from './home-hero/IDorisMascot';
 import { RotatingTitleWord } from './home-hero/RotatingTitleWord';
+import { isAgent24Shell } from '../runtime/agent24-shell';
 import { ScenarioArt } from './home-hero/ScenarioArt';
 import { useEdgeAutoScroll, EdgeScrollZones } from './home-hero/EdgeAutoScroll';
 import {
@@ -1528,6 +1530,18 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const titleAriaLabel = titleParts
     ? `${titleParts.lead}${titlePinnedWord ?? titleRotatingWords[0] ?? ''}${titleParts.tail}`
     : undefined;
+  // Agent24 headless stamps namespace `agent24-creative` and the web sidecar
+  // sets this flag before the client app mounts. Upstream leaves it unset.
+  const agent24Shell = isAgent24Shell();
+  const titleBody = titleParts ? (
+    <>
+      {titleParts.lead}
+      <RotatingTitleWord words={titleRotatingWords} pinned={titlePinnedWord} />
+      {titleParts.tail}
+    </>
+  ) : (
+    titleTemplate
+  );
   let optionRenderIndex = 0;
 
   return (
@@ -1570,6 +1584,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
           <h1
             className={
               'home-hero__title' +
+              (agent24Shell ? ' home-hero__title--with-mascot' : '') +
               (endsWithFullWidthPunctuation(titleTemplate)
                 ? ' home-hero__title--optical-trim'
                 : '')
@@ -1580,16 +1595,13 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 own headline string — en / zh-CN / zh-TW do; the other 16 keep a
                 plain sentence and fall straight through to the `else`. Nothing
                 here knows which locale is which, so any translation can join
-                later by editing one string. */}
-            {titleParts ? (
-              <>
-                {titleParts.lead}
-                <RotatingTitleWord words={titleRotatingWords} pinned={titlePinnedWord} />
-                {titleParts.tail}
-              </>
-            ) : (
-              titleTemplate
-            )}
+                later by editing one string.
+                Agent24 draws the pixel iDoris in the same line. The sentence
+                is wrapped so the flex gap stays between the figure and the
+                words, not between the rotating noun and its neighbours.
+                The entry hero has no run to follow, so the figure stays idle. */}
+            {agent24Shell ? <IDorisMascot state="idle" /> : null}
+            {agent24Shell ? <span className="home-hero__title-text">{titleBody}</span> : titleBody}
           </h1>
           {/* One quiet line under the headline (per product). */}
           <p className="home-hero__subtitle">{t('homeHero.subtitle')}</p>
