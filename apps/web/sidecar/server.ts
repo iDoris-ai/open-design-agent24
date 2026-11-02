@@ -3,6 +3,7 @@ import {
   Agent as HttpAgent,
   createServer as createHttpServer,
   request as createHttpRequest,
+  type ClientRequest,
   type IncomingMessage,
   type Server as HttpServer,
   type ServerResponse,
@@ -25,6 +26,13 @@ import {
   SIDECAR_ENV,
   type WebStatusSnapshot,
 } from "@open-design/sidecar-proto";
+
+import {
+  agent24ShellStatusOmitsBody,
+  isAgent24DocumentRequest,
+  isAgent24HeadlessNamespace,
+  rewriteAgent24ShellDocument,
+} from "./agent24-shell.js";
 
 const HOST = process.env.OD_HOST || "127.0.0.1";
 if (process.env.OD_HOST != null && !/^[a-zA-Z0-9._\-:[\]@]+$/.test(process.env.OD_HOST)) {
@@ -453,6 +461,14 @@ const proxyHttpsAgent = new HttpsAgent({
  * path and are never replayed.
  */
 const PROXY_REPLAY_BODY_LIMIT_BYTES = 512 * 1024;
+/**
+ * Cap for the Agent24 document rewrite buffer. Past this we stop rewriting
+ * and stream the original bytes: the boot script is optional, and a 502
+ * would hide a page that is still valid. Headers have not been committed
+ * yet, so the buffered prefix can be flushed unchanged and the remainder
+ * piped without touching Content-Encoding or Content-Length.
+ */
+export const AGENT24_SHELL_HTML_BUFFER_LIMIT_BYTES = 8 * 1024 * 1024;
 const IDEMPOTENT_PROXY_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE", "OPTIONS"]);
 
 type ProxyRequestBody =
@@ -523,15 +539,146 @@ function shouldReplayProxyRequest(input: {
   return code === "ECONNRESET" || code === "EPIPE";
 }
 
-async function proxyHttpRequest(
+/**
+ * Rewrite one Agent24 HTML document, then settle `finish` exactly once.
+ * Statuses that cannot carry a body, and empty bodies, are forwarded with
+ * their original headers and an empty payload. The upstream `close` /
+ * `aborted` path settles too: a missing `end` used to leave the proxy
+ * promise pending until the socket timed out.
+ */
+function relayAgent24Document(
+  proxyRequest: ClientRequest,
+  proxyResponse: IncomingMessage,
+  response: ServerResponse,
+  isFinished: () => boolean,
+  finish: (send?: () => void) => void,
+): void {
+  if (isFinished()) {
+    proxyResponse.destroy();
+    proxyRequest.destroy();
+    return;
+  }
+
+  const failUpstream = (): void => {
+    finish(() => {
+      if (response.destroyed || response.writableEnded) return;
+      if (!response.headersSent) {
+        response.statusCode = 502;
+        response.setHeader("content-type", "text/plain; charset=utf-8");
+        response.end("upstream document failed");
+        return;
+      }
+      response.destroy();
+    });
+  };
+
+  if (agent24ShellStatusOmitsBody(proxyResponse.statusCode ?? 502)) {
+    let sawEnd = false;
+    const settleEmpty = (): void => {
+      if (sawEnd || isFinished()) return;
+      sawEnd = true;
+      finish(() => {
+        if (response.destroyed || response.writableEnded) return;
+        if (!response.headersSent) {
+          response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
+        }
+        response.end();
+      });
+    };
+    proxyResponse.on("data", () => undefined);
+    proxyResponse.on("end", settleEmpty);
+    proxyResponse.on("error", settleEmpty);
+    proxyResponse.on("aborted", settleEmpty);
+    proxyResponse.on("close", () => {
+      if (!sawEnd) settleEmpty();
+    });
+    proxyResponse.resume();
+    return;
+  }
+
+  const chunks: Buffer[] = [];
+  let bufferedBytes = 0;
+  let passthrough = false;
+  let sawEnd = false;
+
+  const onUpstreamBroken = (): void => {
+    if (sawEnd || isFinished()) return;
+    failUpstream();
+  };
+
+  const beginPassthrough = (prefix: readonly Buffer[], extra: Buffer): void => {
+    if (passthrough || isFinished()) return;
+    passthrough = true;
+    if (response.destroyed || response.writableEnded) {
+      proxyRequest.destroy();
+      finish();
+      return;
+    }
+    if (!response.headersSent) {
+      response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
+    }
+    for (const chunk of prefix) response.write(chunk);
+    if (extra.length > 0) response.write(extra);
+    if (isFinished()) return;
+    proxyResponse.pipe(response);
+  };
+
+  proxyResponse.on("data", (chunk: Buffer | string) => {
+    if (passthrough || isFinished()) return;
+    const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    bufferedBytes += buf.length;
+    if (bufferedBytes > AGENT24_SHELL_HTML_BUFFER_LIMIT_BYTES) {
+      beginPassthrough(chunks.splice(0, chunks.length), buf);
+      return;
+    }
+    chunks.push(buf);
+  });
+  proxyResponse.on("end", () => {
+    sawEnd = true;
+    if (passthrough) {
+      finish();
+      return;
+    }
+    finish(() => {
+      if (response.destroyed || response.writableEnded) return;
+      const status = proxyResponse.statusCode ?? 502;
+      const raw = Buffer.concat(chunks);
+      const rewritten = raw.length === 0
+        ? null
+        : rewriteAgent24ShellDocument(proxyResponse.headers, raw, status);
+      if (!response.headersSent) {
+        response.writeHead(status, rewritten == null ? proxyResponse.headers : rewritten.headers);
+      }
+      response.end(rewritten == null ? raw : rewritten.body);
+    });
+  });
+  proxyResponse.on("aborted", onUpstreamBroken);
+  proxyResponse.on("close", onUpstreamBroken);
+  proxyResponse.on("error", () => {
+    if (sawEnd || isFinished()) return;
+    sawEnd = true;
+    failUpstream();
+  });
+}
+
+export async function proxyHttpRequest(
   target: URL,
   request: IncomingMessage,
   response: ServerResponse,
-  options: { daemonWebPort?: number } = {},
+  options: { agent24Shell?: boolean; daemonWebPort?: number } = {},
 ): Promise<void> {
   const secure = target.protocol === "https:";
   const proxyRequestFactory = secure ? createHttpsRequest : createHttpRequest;
   const headers = { ...request.headers, host: target.host };
+  // Document HTML is rewritten in place. Ask the upstream for identity so the
+  // bytes we inject into are not gzip. Asset and daemon responses keep the
+  // caller's Accept-Encoding.
+  const rewriteDocument = options.agent24Shell === true && isAgent24DocumentRequest({
+    method: request.method,
+    accept: request.headers.accept,
+    pathname: resolveRequestPathname(request.url) ?? "",
+  });
+  if (rewriteDocument) delete headers["accept-encoding"];
   if (options.daemonWebPort != null) {
     const origin = normalizeDaemonProxyOriginHeader({
       daemonOrigin: target.origin,
@@ -549,6 +696,35 @@ async function proxyHttpRequest(
   const body = await captureProxyRequestBody(request);
 
   await new Promise<void>((resolveProxy) => {
+    let finished = false;
+    // True once an upstream response exists. Replay is only valid before any
+    // response bytes, and a mid-body reset must not compete with the
+    // document relay for a second status line.
+    let documentResponseStarted = false;
+    const finish = (send?: () => void): void => {
+      if (finished) return;
+      finished = true;
+      try {
+        send?.();
+      } finally {
+        resolveProxy();
+      }
+    };
+    let activeProxyRequest: ClientRequest | null = null;
+    if (rewriteDocument) {
+      // Buffering does not pipe, so a browser that leaves would otherwise
+      // keep the upstream socket open until it ended on its own.
+      response.on("close", () => {
+        if (finished || response.writableFinished) return;
+        finished = true;
+        try {
+          activeProxyRequest?.destroy();
+        } finally {
+          resolveProxy();
+        }
+      });
+    }
+
     const sendAttempt = (attempt: number): void => {
       const proxyRequest = proxyRequestFactory(
         target,
@@ -560,14 +736,32 @@ async function proxyHttpRequest(
           agent: attempt === 0 ? (secure ? proxyHttpsAgent : proxyHttpAgent) : false,
         },
         (proxyResponse) => {
-          response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
-          proxyResponse.pipe(response);
-          proxyResponse.on("end", resolveProxy);
+          if (!rewriteDocument) {
+            if (finished) {
+              proxyResponse.destroy();
+              return;
+            }
+            response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
+            proxyResponse.pipe(response);
+            proxyResponse.on("end", () => finish());
+            return;
+          }
+          documentResponseStarted = true;
+          relayAgent24Document(
+            proxyRequest,
+            proxyResponse,
+            response,
+            () => finished,
+            finish,
+          );
         },
       );
+      activeProxyRequest = proxyRequest;
 
       proxyRequest.on("error", (error) => {
+        if (finished) return;
         if (
+          !documentResponseStarted &&
           shouldReplayProxyRequest({
             attempt,
             body,
@@ -579,12 +773,17 @@ async function proxyHttpRequest(
           sendAttempt(attempt + 1);
           return;
         }
-        if (!response.headersSent) {
-          response.statusCode = 502;
-          response.setHeader("content-type", "text/plain; charset=utf-8");
-        }
-        response.end(error instanceof Error ? error.message : String(error));
-        resolveProxy();
+        const message = documentResponseStarted
+          ? "upstream document failed"
+          : (error instanceof Error ? error.message : String(error));
+        finish(() => {
+          if (response.destroyed || response.writableEnded) return;
+          if (!response.headersSent) {
+            response.statusCode = 502;
+            response.setHeader("content-type", "text/plain; charset=utf-8");
+          }
+          response.end(message);
+        });
       });
 
       if (body.replayable) {
@@ -1081,6 +1280,8 @@ async function startRegularNextSidecar(
   const handleRequest = app.getRequestHandler();
   const httpServer = createHttpServer(createDaemonProxyHandler(daemonOrigin, handleRequest));
 
+  // Agent24 headless always uses the standalone sidecar, so this branch does
+  // not inject the shell boot script.
   return await createWebSidecarHandle(httpServer, async () => {
     await app.close?.();
   }, port);
@@ -1093,6 +1294,12 @@ async function startStandaloneNextSidecar(
 ): Promise<WebSidecarHandle> {
   const daemonOrigin = resolveDaemonOrigin();
   const backend = await startStandaloneBackend(webRoot);
+  // Agent24 headless always takes this standalone path (`webOutputMode:
+  // "standalone"`) and stamps `namespace: agent24-creative`. The boot script
+  // lands in `<head>` before the ssr:false client app mounts.
+  const agent24Shell = isAgent24HeadlessNamespace(
+    typeof runtime.namespace === "string" ? runtime.namespace : null,
+  );
   const httpServer = createHttpServer(createDaemonProxyHandler(daemonOrigin, async (request, response) => {
     if (!backend.isRunning()) {
       response.statusCode = 502;
@@ -1105,7 +1312,7 @@ async function startStandaloneNextSidecar(
       response.end("invalid request URL");
       return;
     }
-    await proxyHttpRequest(target, request, response);
+    await proxyHttpRequest(target, request, response, { agent24Shell });
   }));
 
   try {

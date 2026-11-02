@@ -9,7 +9,10 @@ async function main(): Promise<void> {
     lifecycle: {
       async start(resources) {
         if (client.stamp.app !== APP_KEYS.WEB) throw new Error(`web sidecar cannot run stamp app ${client.stamp.app}`);
-        return await startWebSidecar({ mode: client.stamp.mode }, resources.port);
+        return await startWebSidecar({
+          mode: client.stamp.mode,
+          namespace: client.stamp.namespace,
+        }, resources.port);
       },
       async status(runtime) {
         return await runtime.status();
