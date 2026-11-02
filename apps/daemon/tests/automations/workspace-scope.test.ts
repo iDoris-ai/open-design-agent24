@@ -3,6 +3,18 @@ import {
   bindProjectToPersistedAutomationWorkspace,
   normalizePersistedAutomationWorkspaceScope,
 } from '../../src/automations/workspace-scope.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/cloud-account.js';
+
+// Persisted automation Workspace scope is cloud-account behaviour (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 describe('persisted automation Workspace scope', () => {
   it('binds the exact persisted billing address without consulting membership authority', () => {

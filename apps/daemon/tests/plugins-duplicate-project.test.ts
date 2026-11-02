@@ -22,6 +22,18 @@ import {
 import { duplicatePluginExampleIntoProject } from '../src/plugins/duplicate-project.js';
 import { removeProjectDir } from '../src/projects.js';
 import { registerPluginRoutes } from '../src/routes/plugins/index.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { DisabledCloudAccount, EnabledCloudAccount, installCloudAccount } from '../src/identity/cloud-account.js';
+
+// These cases bind the remixed project to the request Workspace, which is cloud-account behaviour (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const tempRoots: string[] = [];
 
@@ -218,6 +230,102 @@ describe('plugin project duplication', () => {
       );
     } finally {
       await close(server.server);
+    }
+  });
+
+  it('duplicates locally and leaves the copy unbound under DisabledCloudAccount', async () => {
+    const restoreDisabled = installCloudAccount(DisabledCloudAccount);
+    const root = await makeTempRoot('od-plugin-duplicate-disabled-');
+    const projectsRoot = path.join(root, 'projects');
+    const plugin = await makePreviewPlugin(root, 'disabled-plugin-fixture');
+    const projectId = 'authority-plugin-project';
+    const project = {
+      id: projectId,
+      name: 'Authority Plugin Fixture',
+      skillId: null,
+      designSystemId: null,
+      pendingPrompt: null,
+      metadata: { kind: 'prototype' },
+      createdAt: 1,
+      updatedAt: 1,
+    } as unknown as Project;
+    const randomId = vi.fn()
+      .mockReturnValueOnce(projectId)
+      .mockReturnValueOnce('authority-plugin-conversation');
+    const fetchProjectCreationWorkspaceDirectory = vi.fn(
+      async () => ({ ok: false as const, items: [] }),
+    );
+    const ensureWorkspaceProject = vi.fn();
+    const app = express();
+    app.use(express.json());
+    registerPluginRoutes(app, {
+      db: {
+        prepare: () => ({
+          all: () => [],
+          get: () => null,
+          run: () => undefined,
+        }),
+        transaction: (run: () => unknown) => () => run(),
+      },
+      paths: {
+        PROJECTS_DIR: projectsRoot,
+        PLUGIN_REGISTRY_ROOTS: [],
+        PLUGIN_LOCKFILE_PATH: path.join(root, 'plugins.lock'),
+      },
+      ids: { randomId },
+      projectStore: {
+        insertProject: vi.fn(() => project),
+        getProject: vi.fn(() => project),
+        ensureWorkspaceProject,
+        dbDeleteProject: vi.fn(),
+        removeProjectDir: async (rootDir: string, id: string) => {
+          await rm(path.join(rootDir, id), { recursive: true, force: true });
+        },
+      },
+      conversations: { insertConversation: vi.fn() },
+      plugins: {
+        getInstalledPlugin: vi.fn(() => plugin),
+        listInstalledPlugins: vi.fn(() => []),
+      },
+      verifyWorkspaceRequestAuthority,
+      fetchProjectCreationWorkspaceDirectory,
+      helpers: {
+        requireLocalDaemonRequest: ((_req, _res, next) => next()) as express.RequestHandler,
+        assembleExample: (templateHtml: string) => templateHtml,
+        applyBakedPreviews: (records: unknown[]) => records,
+        sendApiError,
+      },
+    } as unknown as Parameters<typeof registerPluginRoutes>[1]);
+    const server = await listen(app);
+    try {
+      const resp = await fetch(
+        `${server.url}/api/plugins/${encodeURIComponent(plugin.id)}/duplicate-project`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-od-workspace-id': 'workspace-authority',
+            'x-od-workspace-type': 'team',
+            'x-od-workspace-member-id': 'member-authority',
+            'x-od-workspace-role': 'member',
+            'x-od-workspace-lifecycle-state': 'active',
+            'x-od-workspace-member-status': 'active',
+            'x-od-workspace-can-share-projects': 'true',
+            'x-od-workspace-can-write-synced-files': 'true',
+          },
+          body: JSON.stringify({}),
+        },
+      );
+
+      expect(resp.status).toBe(201);
+      expect(randomId).toHaveBeenCalledTimes(2);
+      expect(fetchProjectCreationWorkspaceDirectory).not.toHaveBeenCalled();
+      // The local copy still lands; only the Workspace binding is dropped, so
+      // it stays in the unscoped project list.
+      expect(ensureWorkspaceProject).not.toHaveBeenCalled();
+    } finally {
+      await close(server.server);
+      restoreDisabled();
     }
   });
 

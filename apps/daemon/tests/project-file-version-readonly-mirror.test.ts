@@ -46,6 +46,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startServer } from '../src/server.js';
 import { openDatabase, updateProject, updateWorkspaceProject } from '../src/db.js';
 import { SHARED_PROJECT_PLACEHOLDER_METADATA_KEY } from '../src/collab/shared-project-placeholder.js';
+import { afterAll as afterAllCloudAccount, beforeAll as beforeAllCloudAccount } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../src/identity/cloud-account.js';
+
+// Team-mirror versioning relies on the creation-time Workspace binding, which is cloud-account behaviour (ODX-3).
+let restoreCloudAccountForFile: (() => void) | undefined;
+beforeAllCloudAccount(() => {
+  restoreCloudAccountForFile = installCloudAccount(EnabledCloudAccount);
+});
+afterAllCloudAccount(() => {
+  restoreCloudAccountForFile?.();
+  restoreCloudAccountForFile = undefined;
+});
 
 const WORKSPACE_ID = 'ws-readonly-mirror';
 const OWNER_MEMBER_ID = 'member-owner-readonly-mirror';
