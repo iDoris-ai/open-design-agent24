@@ -7,6 +7,10 @@ import {
   fetchAmrWalletSnapshot,
   fetchVelaLoginStatus,
 } from '../../src/providers/daemon';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 vi.mock('../../src/providers/daemon', () => ({
   fetchAmrWalletSnapshot: vi.fn(),
@@ -126,7 +130,6 @@ describe('legacy opt-out remains dead data', () => {
   it('cannot bypass sign-out', async () => {
     seedLegacyOptOut();
     mockedFetch.mockResolvedValue(snapshot({ status: 'signed_out' }));
-    await expect(checkAmrBalanceGate()).resolves.toEqual({ kind: 'allow' });
-    expect(mockedFetch).not.toHaveBeenCalled();
+    await expect(checkAmrBalanceGate()).resolves.toMatchObject({ kind: 'hard', reason: 'signed_out' });
   });
 });

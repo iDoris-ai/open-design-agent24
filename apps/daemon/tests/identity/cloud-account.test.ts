@@ -9,6 +9,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   CLOUD_ACCOUNT_DISABLED_BODY,
+  DisabledCloudAccount,
+  EnabledCloudAccount,
+  activeCloudAccount,
+  installCloudAccount,
   isCloudAccountEnabled,
   isDisabledCloudAccountPath,
   mountDisabledCloudAccountRoutes,
@@ -31,6 +35,19 @@ function requestTarget(args: unknown[]): string {
 }
 
 describe('DisabledCloudAccount', () => {
+  it('installCloudAccount restores the disabled default frame', () => {
+    expect(activeCloudAccount()).toEqual(DisabledCloudAccount);
+    const restore = installCloudAccount(EnabledCloudAccount);
+    try {
+      expect(activeCloudAccount()).toEqual(EnabledCloudAccount);
+      expect(isCloudAccountEnabled()).toBe(true);
+    } finally {
+      restore();
+    }
+    expect(activeCloudAccount()).toEqual(DisabledCloudAccount);
+    expect(isCloudAccountEnabled()).toBe(false);
+  });
+
   it('is the default and does not treat local project paths as cloud routes', () => {
     expect(isCloudAccountEnabled()).toBe(false);
     expect(isDisabledCloudAccountPath('/api/projects')).toBe(false);
@@ -149,6 +166,11 @@ describe('startServer under DisabledCloudAccount', () => {
     if (dataDir) await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
+  it('keeps DisabledCloudAccount when startServer is called without cloudAccount', () => {
+    expect(activeCloudAccount()).toEqual(DisabledCloudAccount);
+    expect(isCloudAccountEnabled()).toBe(false);
+  });
+
   it('creates a personal project without calling a cloud origin', async () => {
     const before = calls.length;
     const id = `odx3-${Date.now()}`;
@@ -181,4 +203,49 @@ describe('startServer under DisabledCloudAccount', () => {
     expect(during.filter((url) => CLOUD_HOST.test(url))).toEqual([]);
     expect(during.join('\n')).not.toMatch(/amr-api\.open-design\.ai/);
   }, 60_000);
+});
+
+describe('startServer with EnabledCloudAccount', () => {
+  let server: http.Server;
+  let shutdown: (() => Promise<void>) | undefined;
+  let baseUrl: string;
+  let dataDir = '';
+  const savedDataDir = process.env.OD_DATA_DIR;
+
+  beforeAll(async () => {
+    dataDir = await mkdtemp(path.join(tmpdir(), 'odx3-cloud-account-enabled-'));
+    process.env.OD_DATA_DIR = dataDir;
+    const { startServer } = await import('../../src/server.js');
+    const started = (await startServer({
+      port: 0,
+      returnServer: true,
+      cloudAccount: EnabledCloudAccount,
+    })) as {
+      url: string;
+      server: http.Server;
+      shutdown?: () => Promise<void>;
+    };
+    baseUrl = started.url;
+    server = started.server;
+    shutdown = started.shutdown;
+    expect(activeCloudAccount()).toEqual(EnabledCloudAccount);
+    expect(isCloudAccountEnabled()).toBe(true);
+  }, 120_000);
+
+  afterAll(async () => {
+    await shutdown?.().catch(() => undefined);
+    if (server) {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    if (savedDataDir === undefined) delete process.env.OD_DATA_DIR;
+    else process.env.OD_DATA_DIR = savedDataDir;
+    if (dataDir) await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+
+  it('does not answer cloud routes with the disabled account body', async () => {
+    const response = await fetch(`${baseUrl}/api/integrations/vela/status`);
+    const payload = (await response.json()) as { error?: { code?: string } };
+    expect(payload.error?.code).not.toBe('cloud-account-disabled');
+  });
 });

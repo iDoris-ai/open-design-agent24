@@ -907,9 +907,11 @@ import {
   disabledCollabPresenceHandle,
   disabledCollabSyncHandle,
   disabledVelaRoutesLifecycle,
+  installCloudAccount,
   isCloudAccountEnabled,
   mountDisabledCloudAccountRoutes,
   readCloudWorkspaceDirectory,
+  type CloudAccount,
 } from './identity/cloud-account.js';
 import { registerFinalizeRoutes, registerImportRoutes, registerProjectExportRoutes } from './import-export-routes.js';
 import { registerHandoffRoutes } from './routes/handoff.js';
@@ -3181,6 +3183,12 @@ export interface StartServerOptions {
   staticDir?: string;
   /** Opaque child-process environment supplied by the runtime integration seam. */
   inheritedEnvironment?: (baseEnv?: NodeJS.ProcessEnv) => Record<string, string>;
+  /**
+   * Tests that still exercise Vela, collab, billing, or share pass
+   * `EnabledCloudAccount`. Omitted leaves the process default,
+   * `DisabledCloudAccount`.
+   */
+  cloudAccount?: CloudAccount;
 
 }
 
@@ -3206,7 +3214,25 @@ export function createPersonalPublishedCommentMutationHandler(db: Database.Datab
     recordPersonalPublishedCommentMutation(db, comment, context, deleted);
 }
 
-export async function startServer({
+export async function startServer(options: StartServerOptions = {}) {
+  const restoreCloudAccount = options.cloudAccount
+    ? installCloudAccount(options.cloudAccount)
+    : undefined;
+  let cloudAccountReleased = false;
+  const releaseCloudAccount = () => {
+    if (cloudAccountReleased) return;
+    cloudAccountReleased = true;
+    restoreCloudAccount?.();
+  };
+  try {
+    return await startServerNow(options, releaseCloudAccount);
+  } catch (error) {
+    releaseCloudAccount();
+    throw error;
+  }
+}
+
+async function startServerNow({
   port = 7456,
   host = normalizeDaemonBindHost(process.env.OD_BIND_HOST),
   returnServer = false,
@@ -3217,7 +3243,7 @@ export async function startServer({
   runtime = null,
   staticDir = STATIC_DIR,
   inheritedEnvironment = () => ({}),
-}: StartServerOptions = {}) {
+}: StartServerOptions, releaseCloudAccount: () => void) {
   host = normalizeDaemonBindHost(host);
   let resolvedPort = port;
   let daemonShuttingDown = false;
@@ -18589,11 +18615,15 @@ export async function startServer({
       });
     } catch (error) {
       cleanupDaemonBackgroundWork();
+      releaseCloudAccount();
       reject(error);
       return;
     }
     server.once('close', () => {
-      void shutdownDaemonRuns().finally(cleanupDaemonBackgroundWork);
+      void shutdownDaemonRuns().finally(() => {
+        cleanupDaemonBackgroundWork();
+        releaseCloudAccount();
+      });
     });
     // `app.listen` throws synchronously when the port is already in use on
     // some Node versions, but emits an `error` event on others (and for
@@ -18601,6 +18631,7 @@ export async function startServer({
     // returned Promise always settles instead of hanging forever.
     server.on('error', (error) => {
       cleanupDaemonBackgroundWork();
+      releaseCloudAccount();
       reject(error);
     });
   });

@@ -10,6 +10,10 @@ vi.mock('../../src/providers/registry', () => ({
 
 import { SkillDetailsModal } from '../../src/components/SkillDetailsModal';
 import { fetchSkill } from '../../src/providers/registry';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const mockedFetchSkill = vi.mocked(fetchSkill);
 

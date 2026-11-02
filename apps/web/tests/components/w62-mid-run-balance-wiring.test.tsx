@@ -53,6 +53,10 @@ import type {
   Project,
   SkillSummary,
 } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const PROJECT_ID = 'caustic-pool-project';
 /** The team workspace from the report. */

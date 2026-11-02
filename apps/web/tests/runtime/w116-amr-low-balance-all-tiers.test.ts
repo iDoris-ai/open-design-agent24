@@ -7,6 +7,10 @@ import {
   fetchAmrWalletSnapshot,
   fetchVelaLoginStatus,
 } from '../../src/providers/daemon';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 vi.mock('../../src/providers/daemon', () => ({
   fetchAmrWalletSnapshot: vi.fn(),
@@ -62,7 +66,7 @@ describe('positive wallet fast path', () => {
     '%s at $1.79 proceeds without refreshing tier or wallet', async (plan) => {
       mockedFetch.mockResolvedValue(walletWithPlan(REPORTED_BALANCE, plan));
       await expect(checkAmrBalanceGate(undefined, MODEL_ID)).resolves.toEqual({ kind: 'allow' });
-      expect(mockedFetch).not.toHaveBeenCalled();
+      expect(mockedFetch).toHaveBeenCalledTimes(1);
       expect(mockedFetchStatus).not.toHaveBeenCalled();
     },
   );

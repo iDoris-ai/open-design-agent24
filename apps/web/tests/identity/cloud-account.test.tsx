@@ -6,8 +6,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { I18nProvider } from '../../src/i18n';
 import {
+  EnabledCloudAccount,
   LocalSingleUser,
   currentIdentity,
+  installCloudAccount,
   isCloudAccountEnabled,
   isLocalSingleUserContext,
   localWorkspaceContext,
@@ -43,6 +45,23 @@ describe('LocalSingleUser', () => {
     expect(context.permissions.canShareProjects).toBe(false);
     expect(isLocalSingleUserContext(context)).toBe(true);
     expect(context).not.toBeNull();
+  });
+
+  it('installCloudAccount enables the cloud surface and restores the local default', () => {
+    expect(isCloudAccountEnabled()).toBe(false);
+    const restore = installCloudAccount({
+      id: 'cloud-test',
+      displayName: 'Cloud Test',
+      cloud: EnabledCloudAccount,
+    });
+    try {
+      expect(isCloudAccountEnabled()).toBe(true);
+      expect(currentIdentity().cloud).toEqual(EnabledCloudAccount);
+    } finally {
+      restore();
+    }
+    expect(currentIdentity()).toEqual(LocalSingleUser);
+    expect(isCloudAccountEnabled()).toBe(false);
   });
 
   it('speaks the account and share sentences in Chinese, English, and Thai', () => {

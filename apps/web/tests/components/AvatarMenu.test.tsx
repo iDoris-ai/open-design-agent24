@@ -14,6 +14,10 @@ import { AvatarMenu } from '../../src/components/AvatarMenu';
 import { providerModelsCacheKey } from '../../src/components/providerModelsCache';
 import type { ProjectWorkspaceScopeState } from '../../src/collab/useProjectWorkspaceScope';
 import type { AgentInfo, AppConfig, ExecMode } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const { openExternalUrlMock } = vi.hoisted(() => ({
   openExternalUrlMock: vi.fn<(url: string) => Promise<boolean>>(),

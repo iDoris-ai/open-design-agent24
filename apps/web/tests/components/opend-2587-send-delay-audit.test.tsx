@@ -34,6 +34,10 @@ import type {
   Project,
   SkillSummary,
 } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const PROJECT_ID = 'send-latency-project';
 const TEAM_WORKSPACE = 'nt3itfm1b95puq5w33tvzu44';

@@ -9,6 +9,10 @@ import { en } from '../../src/i18n/locales/en';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import type { AppConfig } from '../../src/types';
 import type { SkillSummary } from '@open-design/contracts';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const originalFetch = globalThis.fetch;
 

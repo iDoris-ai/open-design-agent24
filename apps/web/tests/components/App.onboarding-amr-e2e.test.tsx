@@ -31,6 +31,10 @@ import { fetchAmrModels } from '../../src/providers/daemon';
 import { listProjects, listTemplates } from '../../src/state/projects';
 import { I18nProvider, useI18n } from '../../src/i18n';
 import { clearTestRuntimeSession, observeTestRuntimeIdentity, useTestRuntime } from '../../src/components/TestCampaignModal';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const analyticsMocks = vi.hoisted(() => ({ track: vi.fn() }));
 const cmsTestMocks = vi.hoisted(() => ({ realCoordinator: false }));

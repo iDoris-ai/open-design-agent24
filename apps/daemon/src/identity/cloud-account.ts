@@ -16,11 +16,38 @@ export interface DisabledCloudAccount {
 
 export const DisabledCloudAccount: DisabledCloudAccount = { kind: 'disabled' };
 
-export function activeCloudAccount(): DisabledCloudAccount {
-  return DisabledCloudAccount;
+/** Connected Open Design cloud account. Production never installs one. */
+export interface EnabledCloudAccount {
+  readonly kind: 'enabled';
 }
 
-/** False for this fork. A later identity bridge can replace the default. */
+export const EnabledCloudAccount: EnabledCloudAccount = { kind: 'enabled' };
+
+export type CloudAccount = DisabledCloudAccount | EnabledCloudAccount;
+
+type CloudAccountFrame = { account: CloudAccount };
+
+/** The bottom frame is the process default and is never removed. */
+const cloudAccountStack: CloudAccountFrame[] = [{ account: DisabledCloudAccount }];
+
+export function activeCloudAccount(): CloudAccount {
+  return cloudAccountStack[cloudAccountStack.length - 1]!.account;
+}
+
+/**
+ * Push an account for this process. Returns a restore that removes that frame,
+ * not whichever frame happens to be on top.
+ */
+export function installCloudAccount(account: CloudAccount): () => void {
+  const frame: CloudAccountFrame = { account };
+  cloudAccountStack.push(frame);
+  return () => {
+    const index = cloudAccountStack.indexOf(frame);
+    if (index > 0) cloudAccountStack.splice(index, 1);
+  };
+}
+
+/** False while the active account is `DisabledCloudAccount`. */
 export function isCloudAccountEnabled(): boolean {
   return activeCloudAccount().kind !== 'disabled';
 }

@@ -18,6 +18,10 @@ import {
   fetchAmrWalletSnapshot,
   fetchVelaLoginStatus,
 } from '../../src/providers/daemon';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 vi.mock('../../src/providers/daemon', () => ({
   fetchAmrWalletSnapshot: vi.fn(),
@@ -174,14 +178,14 @@ describe('checkAmrBalanceGate', () => {
   it.each(['0', '-1', '0.001', '1.2', '42'])('leaves funding to Link for wallet %s', async (balanceUsd) => {
     mockedFetch.mockResolvedValue(snapshot({ balanceUsd }));
     await expect(checkAmrBalanceGate(undefined, 'model')).resolves.toEqual({ kind: 'allow' });
-    expect(mockedFetch).not.toHaveBeenCalled();
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
     expect(mockedFetchStatus).not.toHaveBeenCalled();
   });
 
-  it('allows without a wallet read while the cloud account is disabled', async () => {
+  it('confirms sign-out before blocking', async () => {
     mockedFetch.mockResolvedValue(snapshot({ status: 'signed_out' }));
-    await expect(checkAmrBalanceGate()).resolves.toEqual({ kind: 'allow' });
-    expect(mockedFetch).not.toHaveBeenCalled();
+    await expect(checkAmrBalanceGate()).resolves.toMatchObject({ kind: 'hard', reason: 'signed_out' });
+    expect(mockedFetch).toHaveBeenLastCalledWith({ refresh: true });
   });
 
   it('allows a freshly signed-in account even with zero wallet', async () => {
@@ -367,9 +371,19 @@ describe('post-failure wallet display authority', () => {
       workspaceMemberId: 'wm-b',
     });
 
-    await expect(teamA).resolves.toBeNull();
-    await expect(teamB).resolves.toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(teamB).resolves.toMatchObject({ balanceUsd: '50' });
+    expect(resolveA).toBeTypeOf('function');
+    resolveA(
+      new Response(
+        JSON.stringify(authoritativeWorkspaceBillingResponse(
+          'ws-team-a',
+          'wm-a',
+          '1.50',
+        )),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    await expect(teamA).resolves.toMatchObject({ balanceUsd: '1.50' });
   });
 });
 
@@ -527,11 +541,9 @@ describe('funding recovery', () => {
       preflight: { workspaceId: 'ws', workspaceMemberId: 'member', modelId: 'model', generatedAt: new Date().toISOString(), funding, modelCovered, codingPlan },
     })));
     vi.stubGlobal('fetch', fetcher);
-    expect(await hasAmrFundingRecovered(scope, 'model')).toBe(false);
-    expect(fetcher).not.toHaveBeenCalled();
-    void funding;
-    void modelCovered;
-    void recovered;
+    expect(await hasAmrFundingRecovered(scope, 'model')).toBe(recovered);
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('includePreflight=1');
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('modelId=model');
   });
   it.each([
     { ...codingPlan, windows: [] },

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { EnabledCloudAccount } from '../src/identity/cloud-account.js';
 import {
   isStaticSpaFallbackRequest,
   resolveDataDir,
@@ -21,7 +22,7 @@ let shutdown: (() => Promise<void> | void) | undefined;
 let routeInventory: StartServerResult['routeInventory'];
 
 beforeAll(async () => {
-  const started = (await startServer({ port: 0, returnServer: true })) as StartServerResult;
+  const started = (await startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount})) as StartServerResult;
   baseUrl = started.url;
   server = started.server;
   shutdown = started.shutdown;

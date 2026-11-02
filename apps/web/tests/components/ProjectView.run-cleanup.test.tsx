@@ -22,6 +22,10 @@ import {
   registerBrandBrowser,
 } from '../../src/runtime/brand-browser-bridge';
 import type { Artifact, ChatMessage, ProjectFile } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const listConversations = vi.fn();
 const listMessages = vi.fn();

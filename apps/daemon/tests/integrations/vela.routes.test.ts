@@ -28,6 +28,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { startServer } from '../../src/server.js';
 import { readAppConfig, writeAppConfig } from '../../src/app-config.js';
+import { EnabledCloudAccount } from '../../src/identity/cloud-account.js';
 import {
   clearAllVelaLiveAccounts,
   clearVelaAuthorizationState,
@@ -216,7 +217,7 @@ beforeAll(async () => {
       },
     },
   });
-  const started = (await startServer({ port: 0, returnServer: true })) as StartedServer;
+  const started = (await startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount})) as StartedServer;
   baseUrl = started.url;
   server = started.server;
 });

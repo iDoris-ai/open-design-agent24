@@ -5,6 +5,10 @@ import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCol
 import { FileViewer } from '../../../src/components/FileViewer';
 import { CollabProvider, useProjectCollabContext } from '../../../src/collab/collab-context';
 import type { ProjectFile } from '../../../src/types';
+import { useEnabledCloudAccount } from '../../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 const fetchMock = vi.fn<typeof fetch>();
 const context: WorkspaceCollabContext = {
   workspaceId: 'ws', workspaceType: 'personal', workspaceMemberId: 'member', role: 'owner',

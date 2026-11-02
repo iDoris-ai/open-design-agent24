@@ -3,8 +3,9 @@ import type { WorkspaceCollabContext } from '@open-design/contracts';
 /**
  * Local single-user identity for this fork.
  *
- * `cloud` stays null. A later Agent24 shell may post
+ * The default `cloud` is null. A later Agent24 shell may post
  * `{ type: 'agent24:identity', user }`. This slice does not wire an iDoris login.
+ * Tests opt into the cloud surface with `installCloudAccount`.
  */
 export interface LocalSingleUser {
   readonly id: 'local';
@@ -18,8 +19,43 @@ export const LocalSingleUser: LocalSingleUser = {
   cloud: null,
 };
 
-export function currentIdentity(): LocalSingleUser {
-  return LocalSingleUser;
+/**
+ * A connected Open Design cloud account. Production never installs one.
+ * Tests that still exercise Vela, collab, billing, share, or AMR pass this
+ * to `installCloudAccount` for the duration of the case.
+ */
+export interface EnabledCloudAccount {
+  readonly kind: 'enabled';
+}
+
+export const EnabledCloudAccount: EnabledCloudAccount = { kind: 'enabled' };
+
+export interface CloudBackedIdentity {
+  readonly id: string;
+  readonly displayName: string;
+  readonly cloud: EnabledCloudAccount;
+}
+
+export type ActiveIdentity = LocalSingleUser | CloudBackedIdentity;
+
+type IdentityFrame = { identity: ActiveIdentity };
+const identityStack: IdentityFrame[] = [{ identity: LocalSingleUser }];
+
+export function currentIdentity(): ActiveIdentity {
+  return identityStack[identityStack.length - 1]!.identity;
+}
+
+/**
+ * Install an identity for this process. The default frame is `LocalSingleUser`
+ * and is never removed. Returns a restore function.
+ */
+export function installCloudAccount(identity: ActiveIdentity): () => void {
+  const frame: IdentityFrame = { identity };
+  identityStack.push(frame);
+  return () => {
+    const index = identityStack.indexOf(frame);
+    if (index > 0) identityStack.splice(index, 1);
+  };
 }
 
 /** False while `currentIdentity().cloud` is null. */

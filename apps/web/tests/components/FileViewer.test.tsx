@@ -113,6 +113,10 @@ import {
   buildWorkspaceSeatSummary,
   type WorkspaceCollabContext,
 } from '@open-design/contracts';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 /** A team workspace context — the only state that can address the resource hub,
  *  and therefore the only one where the public "Publish file" entry is offered. */

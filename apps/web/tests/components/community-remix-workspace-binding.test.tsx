@@ -56,6 +56,10 @@ import { listProjects, listTemplates } from '../../src/state/projects';
 import type { Route } from '../../src/router';
 import type { AgentInfo, AppConfig } from '../../src/types';
 import { workspaceDirectoryFixture } from '../helpers/workspace-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const TEMPLATE_ID = 'example-fundraising-deck';
 const TEMPLATE_PROMPT = 'Remix this seed round deck for my studio.';

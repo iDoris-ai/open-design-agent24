@@ -5,6 +5,7 @@ import * as outboxes from '../src/collab/share-binding-outbox.js';
 import * as startup from '../src/collab/share-binding-startup.js';
 import * as binding from '../src/collab/vela-share-binding-prepare.js';
 import * as stopping from '../src/collab/vela-public-file-stop.js';
+import { EnabledCloudAccount } from '../src/identity/cloud-account.js';
 
 it.each([false, true])('registers the real binding queue once and honors pending stop=%s', async stoppingPending => {
   const scope = { resourceTeamId: 'w', ownerMemberId: 'o', projectId: 'p', filePath: 'local.html' };
@@ -31,7 +32,7 @@ it.each([false, true])('registers the real binding queue once and honors pending
   });
   let started: StartServerResult | undefined;
   try {
-    started = await startServer({ port: 0, returnServer: true }) as StartServerResult;
+    started = await startServer({ port: 0, returnServer: true, cloudAccount: EnabledCloudAccount}) as StartServerResult;
     expect(startSpy).toHaveBeenCalledTimes(1); expect(run).toHaveBeenCalledTimes(1);
     const call = run?.mock.results[0]; if (!call || call.type !== 'return') throw new Error('not started');
     expect(await call.value).toMatchObject({ bound: stoppingPending ? 0 : 1, deferred: stoppingPending ? 1 : 0 });

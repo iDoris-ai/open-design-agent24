@@ -25,6 +25,10 @@ import {
 } from '../../src/collab/useWorkspaceContext';
 import { resetCoalescedGet } from '../../src/lib/coalesced-get';
 import { I18nProvider } from '../../src/i18n';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const DIRECTORY = [
   {

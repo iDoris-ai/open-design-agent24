@@ -18,6 +18,10 @@ import {
   type CollabContextValue,
 } from '../../src/collab/collab-context';
 import type { ProjectFile } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const analytics = vi.hoisted(() => ({
   track: vi.fn(),

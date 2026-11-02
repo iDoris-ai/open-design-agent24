@@ -49,6 +49,10 @@ import type {
   Project,
   SkillSummary,
 } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const PROJECT_ID = 'steer-interrupt-project';
 const FIRST_PROMPT = '先把首屏排出来';

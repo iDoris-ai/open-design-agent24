@@ -31,6 +31,10 @@ import {
   fetchProjectFiles,
   invalidateProjectFilesCache,
 } from '../../src/providers/registry';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 
 const originalFetch = globalThis.fetch;

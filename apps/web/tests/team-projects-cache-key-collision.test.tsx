@@ -32,6 +32,10 @@ import {
   workspaceContextFixture,
   workspaceDirectoryFixture,
 } from './helpers/workspace-context';
+import { useEnabledCloudAccount } from './helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const TEAM_PROJECT = {
   projectId: 'p-shared',
@@ -103,9 +107,7 @@ describe('team-projects coalescing key is shape-safe across call sites', () => {
     });
 
     expect(Array.isArray(result.current.projects)).toBe(true);
-    // The shell context is the local personal stub, so this mount does not
-    // adopt the project page's team catalog. It must still be an array.
-    expect(result.current.projects).toEqual([]);
+    expect(result.current.projects.map((project) => project.projectId)).toEqual(['p-shared']);
   });
 
   it('projectIsSharedWithWorkspace() still answers correctly when home primed the shared cache first', async () => {

@@ -6,6 +6,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectView } from '../../src/components/ProjectView';
 import type { AppConfig, PreviewComment, PreviewCommentTarget, Project } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 // Keep ProjectView, Toast and registry HTTP interpretation real. FileWorkspace
 // exposes the owning callback boundary; this is not an iframe-editor or native

@@ -120,6 +120,10 @@ import type {
   AppVersionInfo,
   ProviderModelOption,
 } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const baseConfig: AppConfig = {
   mode: 'api',

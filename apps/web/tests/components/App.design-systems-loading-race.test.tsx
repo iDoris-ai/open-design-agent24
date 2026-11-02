@@ -31,6 +31,10 @@ import {
 } from '../../src/collab/useWorkspaceContext';
 import { resetCoalescedGet } from '../../src/lib/coalesced-get';
 import { workspaceDirectoryFixture } from '../helpers/workspace-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const workspaceInvalidationHarness = vi.hoisted(() => ({
   handlers: [] as Array<Record<string, (payload: any) => void>>,

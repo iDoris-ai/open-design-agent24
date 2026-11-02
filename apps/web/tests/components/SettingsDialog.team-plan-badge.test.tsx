@@ -23,6 +23,10 @@ import { SettingsDialog } from '../../src/components/SettingsDialog';
 import { I18nProvider } from '../../src/i18n';
 import type { AgentInfo, AppConfig } from '../../src/types';
 import { workspaceDirectoryFixture } from '../helpers/workspace-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 vi.mock('../../src/providers/registry', async () => {
   const actual = await vi.importActual<typeof import('../../src/providers/registry')>(

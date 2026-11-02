@@ -5,7 +5,13 @@
 // an empty array. The UI then showed only the cloud/BYOK fallback even
 // though every other CLI was healthy. These tests pin the per-probe
 // isolation invariant: one broken adapter must not blank the picker.
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/cloud-account.js';
+
+let restoreCloudAccount: (() => void) | undefined;
+beforeEach(() => {
+  restoreCloudAccount = installCloudAccount(EnabledCloudAccount);
+});
 
 vi.mock('../../src/runtimes/launch.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/runtimes/launch.js')>();
@@ -26,6 +32,8 @@ const originalResolveImpl = mockedResolveAgentLaunch.getMockImplementation()!;
 const originalApplyImpl = mockedApplyAgentLaunchEnv.getMockImplementation()!;
 
 afterEach(() => {
+  restoreCloudAccount?.();
+  restoreCloudAccount = undefined;
   mockedResolveAgentLaunch.mockImplementation(originalResolveImpl);
   mockedApplyAgentLaunchEnv.mockImplementation(originalApplyImpl);
 });

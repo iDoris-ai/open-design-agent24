@@ -46,6 +46,10 @@ import {
   fetchDesignSystem,
   fetchProjectFileText,
 } from '../../src/providers/registry';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const fetchDesignSystemMock = vi.mocked(fetchDesignSystem);
 const fetchProjectFileTextMock = vi.mocked(fetchProjectFileText);

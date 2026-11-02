@@ -1,5 +1,5 @@
 import { symlinkSync } from 'node:fs';
-import { test, vi } from 'vitest';
+import { afterEach, beforeEach, test, vi } from 'vitest';
 import { homedir } from 'node:os';
 import { delimiter, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,17 @@ import * as platform from '@open-design/platform';
 import {
   antigravity, assert, chmodSync, detectAgents, detectAgentsStream, inspectAgentExecutableResolution, join, minimalAgentDef, mkdirSync, mkdtempSync, opencode, resolveAgentExecutable, rmSync, spawnEnvForAgent, tmpdir, withEnvSnapshot, withPlatform, writeFileSync,
 } from './helpers/test-helpers.js';
+import { EnabledCloudAccount, installCloudAccount } from '../../src/identity/cloud-account.js';
 import { isCursorAuthFailureText } from '../../src/runtimes/auth.js';
+
+let restoreCloudAccount: (() => void) | undefined;
+beforeEach(() => {
+  restoreCloudAccount = installCloudAccount(EnabledCloudAccount);
+});
+afterEach(() => {
+  restoreCloudAccount?.();
+  restoreCloudAccount = undefined;
+});
 import { agentCapabilities } from '../../src/runtimes/capabilities.js';
 import { getRememberedLiveModels } from '../../src/runtimes/models.js';
 

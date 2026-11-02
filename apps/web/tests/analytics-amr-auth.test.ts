@@ -28,6 +28,10 @@ import {
   resolveAmrAuthTracking,
 } from '../src/analytics/amr-auth';
 import { cancelVelaLogin, startVelaLogin } from '../src/providers/daemon';
+import { useEnabledCloudAccount } from './helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const attribution: AmrEntryAttribution = {
   entryId: 'od-amr-test-entry',

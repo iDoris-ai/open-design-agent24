@@ -22,6 +22,10 @@ import type {
   PreviewComment,
   Project,
 } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const listConversations = vi.fn();
 const listMessages = vi.fn();

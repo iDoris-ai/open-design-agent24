@@ -7,6 +7,10 @@ import { FileViewer } from '../../src/components/FileViewer';
 import { invalidateHtmlSourceSnapshotProject } from '../../src/components/html-source-snapshot-cache';
 import { CollabProvider, type CollabContextValue } from '../../src/collab/collab-context';
 import type { PreviewComment } from '../../src/types';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 vi.mock('../../src/components/BoardComposerPopover', async importOriginal => {
   const original = await importOriginal<typeof import('../../src/components/BoardComposerPopover')>();
   return { ...original, BoardComposerPopover: (props: { draft: string; onDraft: (value: string) => void; onSaveComment: () => void; onSendBatch: () => void;

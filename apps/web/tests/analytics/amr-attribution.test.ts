@@ -10,6 +10,10 @@ import {
   syncAmrAttributionWithOnboardingProfile,
 } from '../../src/analytics/amr-attribution';
 import { saveOnboardingProfile } from '../../src/state/onboarding-profile';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 describe('AMR attribution helper', () => {
   let fetchMock: ReturnType<typeof vi.fn>;

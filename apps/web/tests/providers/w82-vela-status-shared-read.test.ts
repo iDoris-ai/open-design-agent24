@@ -48,6 +48,10 @@ import {
   advanceWorkspaceAccountGeneration,
   resetWorkspaceAccountGeneration,
 } from '../../src/collab/workspace-identity';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const fetchCalls: string[] = [];
 let release: Array<() => void> = [];

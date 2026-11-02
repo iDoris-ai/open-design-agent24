@@ -7,6 +7,10 @@ import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCol
 import { FileViewer } from '../../src/components/FileViewer';
 import { CollabProvider, type CollabContextValue } from '../../src/collab/collab-context';
 import { resetConsumedActionRequestsForTests } from '../../src/runtime/action-request';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const publication = { url: 'https://example.invalid/artifact/proj/stable', slug: 'stable', fileName: 'index.html' };
 const receipt = { filePath: 'index.html', slug: publication.slug, publishedAt: 1, version: 1, versionId: 'v1' };

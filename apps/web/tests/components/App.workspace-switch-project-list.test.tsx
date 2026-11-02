@@ -58,6 +58,10 @@ import {
 import { resetCoalescedGet } from '../../src/lib/coalesced-get';
 import { resetProjectDisplaySnapshots } from '../../src/state/project-display-cache';
 import { workspaceDirectoryFixture } from '../helpers/workspace-context';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const projectViewLifecycle = vi.hoisted(() => ({
   mounts: vi.fn(),

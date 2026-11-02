@@ -32,6 +32,10 @@ import {
   WORKSPACE_BILLING_REFRESH_EVENT,
   WORKSPACE_CONTEXT_REFRESH_EVENT,
 } from '../../src/collab/useWorkspaceContext';
+import { useEnabledCloudAccount } from '../helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 const analyticsMocks = vi.hoisted(() => ({ track: vi.fn() }));
 

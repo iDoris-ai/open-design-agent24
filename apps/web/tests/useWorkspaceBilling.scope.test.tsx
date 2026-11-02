@@ -21,6 +21,10 @@ import {
   workspaceBillingSummaryForContext,
 } from '../src/collab/useWorkspaceContext';
 import { workspaceDirectoryFixture } from './helpers/workspace-context';
+import { useEnabledCloudAccount } from './helpers/enabled-cloud-account';
+
+useEnabledCloudAccount();
+
 
 function teamContext(workspaceId: string): WorkspaceCollabContext {
   return {
