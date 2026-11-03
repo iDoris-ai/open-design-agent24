@@ -47,6 +47,8 @@ import { workspaceTeamTransportEnv } from "./workspace-team.js";
 
 const require = createRequire(import.meta.url);
 const PACKAGED_CHILD_ENV_ALLOWLIST = [
+  // Agent24 hands the CLI bundled in Agent24.app to the agent24 runtime.
+  "AGENT24_BIN",
   "CODEX_HOME",
   "HOME",
   "HTTP_PROXY",

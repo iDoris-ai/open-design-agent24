@@ -288,6 +288,17 @@ describe('packaged child Vite+ environment forwarding', () => {
     expect(env.RANDOM_INTERNAL_FLAG).toBeUndefined();
   });
 
+  it('forwards AGENT24_BIN so the agent24 runtime uses the CLI bundled in Agent24.app', () => {
+    const env = resolvePackagedChildBaseEnv({
+      AGENT24_BIN: '/Applications/Agent24.app/Contents/Resources/backend/agent24',
+      HOME: '/Users/tester',
+      RANDOM_INTERNAL_FLAG: 'drop-me',
+    });
+
+    expect(env.AGENT24_BIN).toBe('/Applications/Agent24.app/Contents/Resources/backend/agent24');
+    expect(env.RANDOM_INTERNAL_FLAG).toBeUndefined();
+  });
+
   it('keeps VP_HOME in the packaged child base env without forwarding unrelated variables', () => {
     const env = resolvePackagedChildBaseEnv({
       HOME: '/Users/tester',
