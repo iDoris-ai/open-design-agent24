@@ -79,18 +79,97 @@ describe('Home logo assets', () => {
     expect(homeHeroSource).toContain('<RotatingTitleWord');
     expect(homeHeroSource).toContain('isAgent24Shell()');
     expect(homeHeroSource).toContain('<IDorisMascot state="idle" />');
-    expect(mascotComponentSource).toContain("state === 'idle' ? ' home-hero__idoris-mascot--breathe'");
+    expect(mascotComponentSource).toContain("const alive = state === 'idle'");
+    expect(mascotComponentSource).toContain("' home-hero__idoris-mascot--alive'");
+    expect(mascotComponentSource).toContain("'/idoris-mascot/blink.svg'");
     expect(mascotComponentSource).toContain("idle: '/idoris-mascot/idle.svg'");
     expect(mascotComponentSource).toContain("thinking: '/idoris-mascot/thinking.svg'");
     expect(mascotComponentSource).toContain("success: '/idoris-mascot/success.svg'");
     expect(mascotComponentSource).toContain("error: '/idoris-mascot/error.svg'");
     expect(homeHeroCss).toContain('image-rendering: pixelated');
     expect(homeHeroCss).toContain('width: 72px');
-    expect(homeHeroCss).toMatch(
-      /@media \(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.home-hero__idoris-mascot\s*\{[^}]*animation:\s*none/,
-    );
+    const reduced = homeHeroCss.slice(homeHeroCss.indexOf('@media (prefers-reduced-motion: reduce)'));
+    const block = reduced.slice(0, reduced.indexOf('}') + reduced.slice(reduced.indexOf('}') + 1).indexOf('}') + 2);
+    expect(block).toContain('.home-hero__idoris-mascot--alive .home-hero__idoris-mascot-float');
+    expect(block).toContain('.home-hero__idoris-mascot--alive:hover .home-hero__idoris-mascot-hop');
+    expect(block).toContain('.home-hero__idoris-mascot--alive .home-hero__idoris-mascot-frame--blink');
+    expect(block).toContain('animation: none');
+    expect(block).toContain('transform: none');
+    expect(block).toContain('opacity: 0');
     expect(configSource).toMatch(
       /export const DEFAULT_PET: PetConfig = \{\s*adopted: false,\s*enabled: false,/,
     );
+  });
+
+  it('ships a blink frame the same size as idle, changing only the eye cells', () => {
+    const idle = mascotSvg('idle');
+    const blink = mascotSvg('blink');
+    const rootTag = (svg: string) => svg.slice(svg.indexOf('<svg'), svg.indexOf('>', svg.indexOf('<svg')) + 1);
+    const idleRoot = rootTag(idle);
+    const blinkRoot = rootTag(blink);
+    for (const attr of ['viewBox="0 0 48 66"', 'width="48"', 'height="66"', 'shape-rendering="crispEdges"']) {
+      expect(idleRoot).toContain(attr);
+      expect(blinkRoot).toContain(attr);
+    }
+    expect(blink).toContain('id="idoris-state-blink"');
+    expect(blink).toContain('id="idoris-outline"');
+
+    const paint = (svg: string) => {
+      const cells = new Map<string, string>();
+      const fillStack: Array<string | null> = [];
+      let fill: string | null = null;
+      for (const line of svg.split('\n')) {
+        if (line.includes('<g')) {
+          fillStack.push(fill);
+          const match = line.match(/fill="(#[0-9A-Fa-f]{6})"/);
+          if (match?.[1]) fill = match[1].toUpperCase();
+        }
+        if (line.includes('</g>') && fillStack.length > 0) fill = fillStack.pop() ?? null;
+        const rect = line.match(/<rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/);
+        if (!rect || fill == null) continue;
+        const x = Number(rect[1]);
+        const y = Number(rect[2]);
+        const w = Number(rect[3]);
+        const h = Number(rect[4]);
+        for (let yy = y; yy < y + h; yy += 1) {
+          for (let xx = x; xx < x + w; xx += 1) cells.set(`${xx},${yy}`, fill);
+        }
+      }
+      return cells;
+    };
+    const idleCells = paint(idle);
+    const blinkCells = paint(blink);
+    const changed: string[] = [];
+    for (const key of new Set([...idleCells.keys(), ...blinkCells.keys()])) {
+      if (idleCells.get(key) !== blinkCells.get(key)) changed.push(key);
+    }
+    changed.sort();
+    expect(changed).toEqual([
+      '13,26',
+      '13,27',
+      '14,25',
+      '14,26',
+      '15,24',
+      '15,25',
+      '15,27',
+      '22,25',
+      '22,26',
+      '24,26',
+      '25,25',
+      '26,25',
+    ]);
+    const skin = '#F9D7B9';
+    const black = '#000000';
+    expect(blinkCells.get('13,26')).toBe(black);
+    expect(blinkCells.get('14,26')).toBe(black);
+    expect(blinkCells.get('15,26')).toBe(black);
+    expect(blinkCells.get('22,25')).toBe(black);
+    expect(blinkCells.get('23,25')).toBe(black);
+    expect(blinkCells.get('24,25')).toBe(black);
+    expect(blinkCells.get('25,25')).toBe(black);
+    expect(blinkCells.get('26,25')).toBe(black);
+    for (const cell of ['15,24', '14,25', '15,25', '22,26', '24,26', '13,27', '15,27']) {
+      expect(blinkCells.get(cell)).toBe(skin);
+    }
   });
 });

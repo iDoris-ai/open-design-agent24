@@ -109,6 +109,10 @@ describe('agent24 shell flag', () => {
     expect(isAgent24HeadlessNamespace('default')).toBe(false);
     expect(isAgent24HeadlessNamespace('headless')).toBe(false);
     expect(isAgent24HeadlessNamespace('agent24-creative-extra')).toBe(false);
+    // The daemon's What's New gate keys off the same namespace; a drift there would
+    // silently resume requests to whatsnew.open-design.ai inside Agent24.
+    const whatsNew = readFileSync(new URL('../../daemon/src/services/whats-new.ts', import.meta.url), 'utf8');
+    expect(whatsNew.match(/const AGENT24_HEADLESS_NAMESPACE = '([^']+)'/)?.[1]).toBe(packagedNamespace);
   });
 
   it('injects a head script that sets the client flag, and leaves other namespaces alone at the predicate', () => {

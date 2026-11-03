@@ -14,6 +14,7 @@ import {
 import { useAnalytics, useAppVersion } from '../analytics/provider';
 import { isResolvedAppVersion } from '../analytics/app-version';
 import { trackWhatsNewPopupClick, trackWhatsNewPopupSurfaceView } from '../analytics/events';
+import { isAgent24Shell } from '../runtime/agent24-shell';
 import styles from './WhatsNewPopup.module.css';
 
 // Post-update highlights dialog, shown once per highlight on the home surface
@@ -71,7 +72,18 @@ type CardModel = {
 // `active` reports whether Home is the active entry view. EntryShell keeps
 // every entry view mounted, so the dialog gates its fetch/show decision and its
 // `page_name: 'home'` analytics on this flag instead of on mount alone.
+//
+// Agent24 never mounts the card. The body fetches `/api/whats-new`, and the
+// daemon turns that into a request to whatsnew.open-design.ai. That card is
+// an upstream release announcement. Returning here, before the body's hooks,
+// means the fetch never starts. EntryShell is the only JSX mount; the check
+// lives on the component so that site stays untouched.
 export function WhatsNewPopup({ active }: { active: boolean }) {
+  if (isAgent24Shell()) return null;
+  return <WhatsNewPopupBody active={active} />;
+}
+
+function WhatsNewPopupBody({ active }: { active: boolean }) {
   const { t, locale } = useI18n();
   const analytics = useAnalytics();
   const hookAppVersion = useAppVersion();

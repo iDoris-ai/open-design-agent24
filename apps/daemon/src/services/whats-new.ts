@@ -37,6 +37,14 @@ export const DEFAULT_WHATS_NEW_URL = 'https://whatsnew.open-design.ai/whats-new.
  */
 const WHATS_NEW_RELEASE_CHANNELS = new Set(['beta', 'prerelease', 'preview', 'stable']);
 
+/**
+ * Agent24 headless namespace. A local string so this service does not import
+ * the web or packaged packages. It must stay equal to
+ * `AGENT24_HEADLESS_NAMESPACE` in `apps/web/src/runtime/agent24-shell.ts`
+ * and `apps/packaged/src/agent24-headless.ts`.
+ */
+const AGENT24_HEADLESS_NAMESPACE = 'agent24-creative';
+
 // Short enough that an operator's edit reaches users on their next Home visit
 // without a long stale window, long enough that Home activations do not hammer
 // the origin.
@@ -48,8 +56,14 @@ const WHATS_NEW_TIMEOUT_MS = 4_000;
  * `OD_WHATS_NEW_URL` overrides it for local fixtures and tests (e.g. a
  * tools-serve endpoint) regardless of channel; otherwise the dedicated R2
  * object is used only on release channels.
+ *
+ * The Agent24 sidecar (`OD_SIDECAR_NAMESPACE=agent24-creative`) is the
+ * exception: it never fetches, even when the override is set. A stray
+ * `GET /api/whats-new` must not reach whatsnew.open-design.ai. Other
+ * namespaces keep the override.
  */
 export function whatsNewSourceUrl(env: NodeJS.ProcessEnv, channel: string): string | null {
+  if (env.OD_SIDECAR_NAMESPACE === AGENT24_HEADLESS_NAMESPACE) return null;
   const override = env.OD_WHATS_NEW_URL?.trim();
   if (override) return override;
   return WHATS_NEW_RELEASE_CHANNELS.has(channel) ? DEFAULT_WHATS_NEW_URL : null;

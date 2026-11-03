@@ -41,6 +41,7 @@ import {
 } from '../analytics/events';
 import { LOCALE_LABEL, LOCALES, useI18n } from '../i18n';
 import { isCloudAccountEnabled } from '../identity/IdentityBridge';
+import { isAgent24Shell } from '../runtime/agent24-shell';
 import { LocalAccountNotice } from '../identity/LocalAccountNotice';
 import { localAccountSentence, localAccountTitle } from '../identity/local-account-copy';
 import type { Locale } from '../i18n';
@@ -1927,8 +1928,15 @@ export function SettingsDialog({
   // Two-stage inline confirm for the destructive manual cache clear.
   const [clearUpdaterCacheStage, setClearUpdaterCacheStage] = useState<'idle' | 'confirm'>('idle');
   const [clearUpdaterCacheBusy, setClearUpdaterCacheBusy] = useState(false);
+  // Agent24 ships OD by changing the pin. About must not subscribe to the
+  // host updater or offer check / download / install / silent update / cache
+  // clear. The GitHub releases link below stays: it is an informational
+  // link (ODX-2), not the upgrade entry. UpdateDialog, which is that entry,
+  // is hidden entirely.
+  const agent24Shell = isAgent24Shell();
 
   useEffect(() => {
+    if (agent24Shell) return;
     let mounted = true;
     const unsubscribe = subscribeToUpdaterStatus((status) => {
       if (!mounted) return;
@@ -1946,7 +1954,7 @@ export function SettingsDialog({
       mounted = false;
       unsubscribe();
     };
-  }, []);
+  }, [agent24Shell]);
 
   const aboutUpdateControl = useMemo(() => {
     const control = deriveAboutUpdateControl(aboutUpdaterModel, appVersionInfo);
@@ -1989,6 +1997,7 @@ export function SettingsDialog({
   }, [aboutUpdaterToastText, t]);
 
   const handleAboutUpdateAction = useCallback(async () => {
+    if (agent24Shell) return;
     if (aboutUpdateActionBusy || aboutUpdaterModel.busy || aboutUpdateControl.primaryAction == null) return;
     setAboutUpdateActionBusy(true);
     setAboutUpdateQuitFailed(false);
@@ -2024,6 +2033,7 @@ export function SettingsDialog({
       setAboutUpdateActionBusy(false);
     }
   }, [
+    agent24Shell,
     aboutUpdateActionBusy,
     aboutUpdateControl.primaryAction,
     aboutUpdaterModel.busy,
@@ -2040,7 +2050,7 @@ export function SettingsDialog({
   // stuck update state. The desktop owns the capability; this handler only
   // reports the outcome and refreshes the About updater model.
   const handleClearUpdaterCache = useCallback(() => {
-    if (clearUpdaterCacheBusy) return;
+    if (agent24Shell || clearUpdaterCacheBusy) return;
     setClearUpdaterCacheBusy(true);
     void (async () => {
       try {
@@ -2056,7 +2066,7 @@ export function SettingsDialog({
         setClearUpdaterCacheStage('idle');
       }
     })();
-  }, [clearUpdaterCacheBusy, t]);
+  }, [agent24Shell, clearUpdaterCacheBusy, t]);
 
 
   // Imperative handle for the External MCP section. The dialog footer Save
@@ -6121,16 +6131,18 @@ export function SettingsDialog({
                       <div className="settings-about-version-left">
                         <dt>{t('settings.appVersion')}</dt>
                         <span className="settings-about-version-num">{appVersionInfo.version}</span>
-                        <dd
-                          aria-live="polite"
-                          className={`settings-about-update-status settings-about-update-status--${aboutUpdateControl.statusTone}`}
-                        >
-                          {t(aboutUpdateControl.statusKey, aboutUpdateControl.statusVars)}
-                        </dd>
+                        {agent24Shell ? null : (
+                          <dd
+                            aria-live="polite"
+                            className={`settings-about-update-status settings-about-update-status--${aboutUpdateControl.statusTone}`}
+                          >
+                            {t(aboutUpdateControl.statusKey, aboutUpdateControl.statusVars)}
+                          </dd>
+                        )}
                       </div>
                     </div>
                     <div className="settings-about-update-actions">
-                      {aboutUpdateControl.primaryLabelKey ? (
+                      {!agent24Shell && aboutUpdateControl.primaryLabelKey ? (
                         <button
                           type="button"
                           className={`settings-about-update-button${
@@ -6187,6 +6199,7 @@ export function SettingsDialog({
               ) : (
                 <div className="empty-card">{t('settings.versionUnavailable')}</div>
               )}
+              {agent24Shell ? null : (
               <div className="settings-about-diagnostics settings-about-silent-updates">
                 <label className="settings-about-toggle">
                   <input
@@ -6256,7 +6269,8 @@ export function SettingsDialog({
                   </span>
                 </label>
               </div>
-              {aboutUpdaterModel.environment === 'desktop'
+              )}
+              {!agent24Shell && aboutUpdaterModel.environment === 'desktop'
                 && aboutUpdaterModel.supported
                 && appVersionInfo?.packaged !== false ? (
                 <div className="settings-about-diagnostics">

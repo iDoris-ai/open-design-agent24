@@ -11,6 +11,7 @@ import {
 } from '../analytics/events';
 import { useI18n } from '../i18n';
 import { openExternalUrl } from '../providers/registry';
+import { isAgent24Shell } from '../runtime/agent24-shell';
 import {
   checkForUpdaterUpdate,
   deriveUpdaterModel,
@@ -39,7 +40,24 @@ function shouldRunManualCheck(status: OpenDesignHostUpdaterStatusSnapshot): bool
   return status.state === 'idle' || status.state === 'not-available' || status.state === 'error';
 }
 
+/**
+ * Agent24 hides this dialog completely.
+ *
+ * The dialog is the Open Design upgrade entry: on mount it syncs menu
+ * labels and subscribes to the host updater, and opening it runs
+ * `checkForUpdaterUpdate` plus download and install. Agent24 publishes OD
+ * upgrades by changing its own pin, so this shell must not offer that
+ * entry. The GitHub releases link inside the dialog is part of the same
+ * entry and goes away with it. Informational GitHub links stay on the
+ * design-files panel and on Settings → About (ODX-2). App.tsx keeps
+ * mounting `<UpdateDialog />`; returning here skips every hook in the body.
+ */
 export function UpdateDialog() {
+  if (isAgent24Shell()) return null;
+  return <UpdateDialogBody />;
+}
+
+function UpdateDialogBody() {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
   const analyticsTrackRef = useRef(analytics.track);

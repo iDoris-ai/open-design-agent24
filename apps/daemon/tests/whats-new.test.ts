@@ -39,6 +39,15 @@ describe('whatsNewSourceUrl', () => {
       'https://fixture.local/whats-new.json',
     );
   });
+
+  it('refuses the hosted document for the Agent24 sidecar namespace, even with an override', () => {
+    const env = {
+      OD_SIDECAR_NAMESPACE: 'agent24-creative',
+      OD_WHATS_NEW_URL: DEFAULT_WHATS_NEW_URL,
+    };
+    expect(whatsNewSourceUrl(env, 'stable')).toBeNull();
+    expect(whatsNewSourceUrl({ OD_SIDECAR_NAMESPACE: 'open-design' }, 'stable')).toBe(DEFAULT_WHATS_NEW_URL);
+  });
 });
 
 describe('parseWhatsNewDocument', () => {
@@ -106,6 +115,24 @@ describe('createWhatsNewService', () => {
     expect(first.content?.title).toBe('Design system sync');
     expect(second.content?.title).toBe('Design system sync');
     expect(calls).toBe(1);
+  });
+
+  it('does not fetch when the sidecar namespace is agent24-creative', async () => {
+    let calls = 0;
+    const service = createWhatsNewService({
+      env: {
+        OD_SIDECAR_NAMESPACE: 'agent24-creative',
+        OD_WHATS_NEW_URL: DEFAULT_WHATS_NEW_URL,
+      },
+      fetchImpl: async () => {
+        calls += 1;
+        return jsonResponse(DOC);
+      },
+    });
+    const result = await service.readWhatsNew('stable');
+    expect(result.id).toBeNull();
+    expect(result.content).toBeNull();
+    expect(calls).toBe(0);
   });
 
   it('skips the network entirely on non-release channels', async () => {
