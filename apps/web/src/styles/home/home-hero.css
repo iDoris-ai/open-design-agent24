@@ -224,19 +224,18 @@
   opacity: 0;
   pointer-events: none;
 }
-/* Idle only. 5px is a whole pixel step at the 72px display size. The 2deg
-   sway is the one non-axis transform; translation stays on whole pixels. */
+/* Idle only. Pixel art blurs on any rotation or fractional offset, so the
+   bob moves in whole-pixel steps (steps(5) over 5px) and the sway is a 1px
+   sideways shift at the top of the bob, never a rotate. */
 .home-hero__idoris-mascot--alive .home-hero__idoris-mascot-float {
-  transform-origin: 50% 100%;
-  animation: idoris-mascot-float 2.8s ease-in-out infinite;
+  animation: idoris-mascot-float 1.4s steps(5, jump-none) infinite alternate;
 }
 @keyframes idoris-mascot-float {
-  0%,
-  100% {
-    transform: translateY(0) rotate(0deg);
+  0% {
+    transform: translate(0, 0);
   }
-  50% {
-    transform: translateY(-5px) rotate(2deg);
+  100% {
+    transform: translate(1px, -5px);
   }
 }
 /* One blink per 4s. The lid is down for the last 3.5% (140ms) and the
@@ -255,7 +254,7 @@
   }
 }
 .home-hero__idoris-mascot--alive:hover .home-hero__idoris-mascot-hop {
-  animation: idoris-mascot-hop 0.42s ease-out;
+  animation: idoris-mascot-hop 0.42s steps(6, jump-none);
 }
 @keyframes idoris-mascot-hop {
   0% {

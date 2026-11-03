@@ -128,8 +128,10 @@ describe('iDoris home mascot', () => {
     expect(block).toContain('transform: none');
     expect(block).toContain('opacity: 0');
     expect(homeHeroCss).toContain('image-rendering: pixelated');
-    expect(homeHeroCss).toContain('translateY(-5px)');
-    expect(homeHeroCss).toContain('rotate(2deg)');
+    expect(homeHeroCss).toContain('translate(1px, -5px)');
+    expect(homeHeroCss).toContain('steps(5, jump-none)');
+    // Rotation or fractional easing would smear the pixel art.
+    expect(homeHeroCss).not.toMatch(/idoris-mascot[\s\S]{0,400}rotate\(/);
     expect(homeHeroCss).toContain('translateY(-6px)');
     expect(homeHeroCss).toContain('idoris-mascot-blink 4s');
 
