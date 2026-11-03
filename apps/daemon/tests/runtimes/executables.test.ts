@@ -829,3 +829,33 @@ fsTest('codexAppBundleCandidates is empty on non-darwin platforms', () => {
     assert.deepEqual(codexAppBundleCandidates(), []);
   });
 });
+
+// Agent24 hands the CLI bundled inside Agent24.app to the OD daemon through
+// AGENT24_BIN, so a machine with no `agent24` on PATH still has the runtime.
+fsTest(
+  'resolveAgentExecutable honors AGENT24_BIN for the agent24 runtime when PATH has none',
+  () => {
+    const root = mkdtempSync(join(tmpdir(), 'od-agent24-env-bin-'));
+    try {
+      return withEnvSnapshot(['PATH', 'OD_AGENT_HOME', 'OD_RESOURCE_ROOT', 'AGENT24_BIN'], () => {
+        const bundled = join(root, 'Agent24.app', 'Contents', 'Resources', 'backend', 'agent24');
+        mkdirSync(join(root, 'Agent24.app', 'Contents', 'Resources', 'backend'), { recursive: true });
+        mkdirSync(join(root, 'empty-path'), { recursive: true });
+        writeFileSync(bundled, '#!/bin/sh\nexit 0\n');
+        chmodSync(bundled, 0o755);
+        process.env.PATH = join(root, 'empty-path');
+        process.env.OD_AGENT_HOME = join(root, 'empty-home');
+        process.env.OD_RESOURCE_ROOT = '';
+        delete process.env.AGENT24_BIN;
+
+        const def = minimalAgentDef({ id: 'agent24', bin: 'agent24' });
+        assert.equal(resolveAgentExecutable(def), null);
+
+        process.env.AGENT24_BIN = bundled;
+        assert.equal(resolveAgentExecutable(def), bundled);
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
