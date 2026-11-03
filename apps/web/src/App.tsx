@@ -170,6 +170,13 @@ import {
   stashHomePromptHandoff,
 } from './components/home-hero/plugin-authoring';
 import { goBack, navigate, useRoute, type Route } from './router';
+import {
+  AGENT24_DEFAULT_AGENT_ID,
+  isAgent24Shell,
+  onboardingEntryRoute,
+  shouldLeaveAgent24OnboardingRoute,
+  withAgent24FirstRunDefaults,
+} from './runtime/agent24-onboarding';
 import { navigationTiming, navigationPage, usePageNavigationReady, observeNavigation } from './observability/navigation-timing';
 import { useStartupReady } from './observability/startup-ready';
 import {
@@ -362,11 +369,18 @@ const AGENT_FOCUS_REFRESH_THROTTLE_MS = 10_000;
 /**
  * Whether this launch should hand the user to the first-run onboarding flow.
  *
- * Two conditions, both about the *user*, neither about where they happen to be
- * in the app: they have never completed onboarding (on either the local or the
- * daemon copy — `mergeDaemonConfig` ratchets the two before this runs), and
- * they did not arrive through an explicit deep link that onboarding must not
- * hijack (the collab demo and the community gallery are shareable URLs).
+ * Agent24 never does. The shell has no Agent24 row on that page, and a
+ * machine without a listed CLI cannot leave it. Boot records the flow as
+ * finished (`withAgent24FirstRunDefaults`) so the other `onboardingCompleted`
+ * gates stay consistent; this predicate is the backstop if that write has
+ * not landed yet.
+ *
+ * Upstream, two conditions, both about the *user*, neither about where they
+ * happen to be in the app: they have never completed onboarding (on either
+ * the local or the daemon copy — `mergeDaemonConfig` ratchets the two before
+ * this runs), and they did not arrive through an explicit deep link that
+ * onboarding must not hijack (the collab demo and the community gallery are
+ * shareable URLs).
  *
  * Deliberately a pure predicate over a resolved config: the redirect belongs to
  * the one-shot boot pass, and expressing it as a function of "who the user is"
@@ -376,6 +390,7 @@ export function shouldRouteToFirstRunOnboarding(
   config: AppConfig,
   pathname: string,
 ): boolean {
+  if (isAgent24Shell()) return false;
   if (config.onboardingCompleted === true) return false;
   if (
     pathname.startsWith('/projects/')
@@ -1074,7 +1089,9 @@ function AppInner() {
       root.classList.remove('is-window-blurred');
     };
   }, [clientType, hostPlatform]);
-  const [config, setConfig] = useState<AppConfig>(() => loadConfig());
+  const [config, setConfig] = useState<AppConfig>(
+    () => withAgent24FirstRunDefaults(loadConfig()),
+  );
   const configRef = useRef(config);
   configRef.current = config;
   const latestPersistedConfigRef = useRef(config);
@@ -2237,7 +2254,20 @@ function AppInner() {
     if (status) applyAmrLoginStatus(status, { restartOnSignIn: true });
   }, [applyAmrLoginStatus]);
 
+  // `/onboarding` is not a usable page in Agent24. Replace it wherever it
+  // came from (address bar, a stale history entry). One-shot navigations
+  // that used to push the page now push Home, and the Cloud sign-in effect
+  // below returns immediately, so this replacement has nothing to bounce
+  // against.
   useEffect(() => {
+    if (!shouldLeaveAgent24OnboardingRoute(route)) return;
+    navigate({ kind: 'home', view: 'home' }, { replace: true });
+  }, [route]);
+
+  useEffect(() => {
+    // Onboarding is the upstream Cloud sign-in gate. Inside Agent24 that
+    // navigation would undo the Home replacement on the next pass.
+    if (isAgent24Shell()) return;
     const usesOpenDesignCloud =
       config.mode === 'daemon'
       && config.agentId === AMR_AGENT_ID;
@@ -2258,7 +2288,7 @@ function AppInner() {
       && route.fileName === observedPublicShareLink.filePath) return;
     if (!cloudIdentityRejected) return;
     if (route.kind === 'home' && route.view === 'onboarding') return;
-    navigate({ kind: 'home', view: 'onboarding' }, { replace: true });
+    navigate(onboardingEntryRoute(), { replace: true });
   }, [
     amrLoginStatus,
     config.agentId,
@@ -2298,6 +2328,19 @@ function AppInner() {
         setDsLoading(false);
         setProjectsLoading(false);
         setPromptTemplatesLoading(false);
+        // Boot returns before the daemon merge. The in-memory config may
+        // already carry Agent24's defaults; localStorage still has the raw
+        // load until we write it. A later launch with a live daemon then
+        // ratchets the same completion instead of re-arming onboarding.
+        const diskConfig = loadConfig();
+        const settled = withAgent24FirstRunDefaults(latestPersistedConfigRef.current);
+        if (withAgent24FirstRunDefaults(diskConfig) !== diskConfig) {
+          saveConfig(settled);
+        }
+        if (settled !== latestPersistedConfigRef.current) {
+          latestPersistedConfigRef.current = settled;
+          setConfig(settled);
+        }
         setDaemonConfigLoaded(true);
         setDaemonAppConfigReady(false);
         // Composio hydration also depends on the daemon. With no daemon
@@ -2497,7 +2540,8 @@ function AppInner() {
             next.composio = normalizeSavedComposioConfig(next.composio);
           }
         }
-        saveConfig(next);
+        const settled = withAgent24FirstRunDefaults(next);
+        saveConfig(settled);
         if (
           daemonMediaProvidersResult.status === 'ok'
           && migratedLocalMediaProviders
@@ -2510,9 +2554,9 @@ function AppInner() {
         // Migrate localStorage prefs to daemon on first boot with the new
         // endpoint. If daemon already had values the merge above used them;
         // writing back is idempotent and keeps both sides in sync.
-        void syncConfigToDaemon(next);
-        latestPersistedConfigRef.current = next;
-        setConfig(next);
+        void syncConfigToDaemon(settled);
+        latestPersistedConfigRef.current = settled;
+        setConfig(settled);
 
         // Route first-run users through the global onboarding panel.
         // The onboarding panel and the privacy banner have independent
@@ -2520,8 +2564,10 @@ function AppInner() {
         // banner keys off `privacyDecisionAt`. They may coexist on the
         // first launch; the banner sits above the modal layer so it
         // stays actionable regardless of the active view.
-        if (shouldRouteToFirstRunOnboarding(next, window.location.pathname)) {
-          navigate({ kind: 'home', view: 'onboarding' }, { replace: true });
+        // Agent24 has already recorded completion above, and the predicate
+        // refuses the shell, so this does not leave Home.
+        if (shouldRouteToFirstRunOnboarding(settled, window.location.pathname)) {
+          navigate(onboardingEntryRoute(), { replace: true });
         }
         setDaemonConfigLoaded(true);
         // Only a non-null GET payload means we actually observed daemon prefs.
@@ -2600,6 +2646,20 @@ function AppInner() {
       return;
     }
     if (config.agentId) return;
+    // Agent24's empty slot is its own runtime, not whichever CLI happens to
+    // answer first. Boot usually fills this before the probe returns; this
+    // is the same rule if the slot is still empty once agents have loaded
+    // (including when none of them are installed).
+    if (isAgent24Shell()) {
+      setConfig((prev) => {
+        if (prev.agentId) return prev;
+        const next: AppConfig = { ...prev, agentId: AGENT24_DEFAULT_AGENT_ID };
+        saveConfig(next);
+        void syncConfigToDaemon(next);
+        return next;
+      });
+      return;
+    }
     const firstAvailable = agents.find((agent) => agent.available && !(cloudOff && agent.id === 'amr'));
     if (!firstAvailable) return;
     setConfig((prev) => {
@@ -5469,18 +5529,24 @@ function AppInner() {
   };
 
   const handleResetOnboarding = useCallback((next: AppConfig) => {
-    latestPersistedConfigRef.current = next;
-    saveConfig(next);
-    void syncConfigToDaemon(next, { allowOnboardingReset: true });
-    setConfig(next);
+    // Agent24 has nowhere useful to replay. Putting the bit back immediately
+    // keeps the privacy banner and the agent fill on the "finished" side of
+    // their gates, and the route below stays on Home.
+    const settled = withAgent24FirstRunDefaults(next);
+    latestPersistedConfigRef.current = settled;
+    saveConfig(settled);
+    void syncConfigToDaemon(settled, { allowOnboardingReset: true });
+    setConfig(settled);
     setSettingsOpen(false);
     settingsDraftConfigRef.current = null;
     setSettingsHighlight(null);
-    navigate({ kind: 'home', view: 'onboarding' });
+    navigate(onboardingEntryRoute());
   }, []);
 
   const handleActiveCloudSignOut = useCallback(async () => {
-    const next = resetExecutionConfigAfterSignOut(latestPersistedConfigRef.current);
+    const next = withAgent24FirstRunDefaults(
+      resetExecutionConfigAfterSignOut(latestPersistedConfigRef.current),
+    );
     latestPersistedConfigRef.current = next;
     saveConfig(next);
     setConfig(next);
@@ -5488,7 +5554,7 @@ function AppInner() {
     setSettingsOpen(false);
     settingsDraftConfigRef.current = null;
     setSettingsHighlight(null);
-    navigate({ kind: 'home', view: 'onboarding' });
+    navigate(onboardingEntryRoute());
     await syncConfigToDaemon(next, { allowOnboardingReset: true });
   }, []);
 
@@ -5554,6 +5620,7 @@ function AppInner() {
   }, [pendingCreationProjectId]);
   let appMain: ReactNode;
   const pendingFirstRunOnboardingRoute =
+    !isAgent24Shell() &&
     route.kind === 'home' &&
     route.view === 'home' &&
     config.onboardingCompleted !== true &&
